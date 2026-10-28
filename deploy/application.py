@@ -33,6 +33,11 @@ for name in ['compose.yaml','storage.compose.yaml','database-init.sh']:
  if not source.is_file() or source.is_symlink(): raise SystemExit('Trusted release file missing: '+name)
  shutil.copyfile(source,release/name)
 (release/'image.env').write_text('IMAGE_TAG='+args.image_tag+'\n')
+# Service env_file paths resolve against the release, independently of CLI --env-file.
+environment=release/'.env'
+if environment.is_symlink(): environment.unlink()
+elif environment.exists(): raise SystemExit('Unexpected release-local environment file')
+environment.symlink_to(original/'.env')
 command=['docker','compose','-p',args.application,'--env-file',str(original/'.env'),'--env-file',str(home/'apps'/(args.application+'.env')),'--env-file',str(release/'image.env'),'-f',str(release/'compose.yaml'),'-f',str(release/'storage.compose.yaml')]
 run(command+['pull'])
 maintenance=home/'run'/('maintenance-'+args.application)
