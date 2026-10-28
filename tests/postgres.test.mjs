@@ -13,6 +13,8 @@ test('PostgreSQL capture, Drive-first commit, rollback and empty-database restor
  const restoreName=url.pathname.slice(1)+'_recovery_test';
  await admin.query(`CREATE DATABASE "${restoreName}"`);
  const source=new pg.Pool({connectionString:url.href});const recovery=new pg.Pool({connectionString:new URL('/'+restoreName,url).href});
+ const unexpected=[];let cleaning=false;
+ for(const pool of [source,recovery])pool.on('error',error=>{if(!cleaning)unexpected.push(error);});
  const capture=await readFile(new URL('../storage/capture.sql',import.meta.url),'utf8');
  const schema=`CREATE SCHEMA mes_private;CREATE TABLE public.records(id bigint generated always as identity primary key,value jsonb not null);CREATE TABLE mes_private.users(id text primary key,password text not null,record bigint references public.records(id));`;
  const remote=new Memory(),coordinator=new Coordinator({transport:remote,wrappingSecret:'isolated-test-secret-for-integration'});
@@ -35,5 +37,6 @@ test('PostgreSQL capture, Drive-first commit, rollback and empty-database restor
   assert.ok(![...remote.data.values()].some(bytes=>bytes.toString().includes('bcrypt-hash')));
   const restored=driveFirstPool(recovery,{checkHead:parent=>coordinator.check('mes-ticket',parent),commit:value=>coordinator.commit('mes-ticket',value)});
   const row=await restored.query("INSERT INTO public.records(value) VALUES('{}') RETURNING id");assert.ok(Number(row.rows[0].id)>2);
- }finally{await source.end();await recovery.end();await admin.query(`DROP DATABASE "${restoreName}" WITH (FORCE)`);await admin.end();}
+  assert.equal(unexpected.length,0);
+ }finally{cleaning=true;await source.end();await recovery.end();await admin.query(`DROP DATABASE "${restoreName}" WITH (FORCE)`);await admin.end();}
 });
