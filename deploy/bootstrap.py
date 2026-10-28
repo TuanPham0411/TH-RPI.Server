@@ -2,7 +2,7 @@
 """One-time/repeatable broker deployment by the TH-Server management runner.
 Never prints Docker environment variables, OAuth credentials or application tokens.
 """
-import argparse, json, os, pathlib, secrets, shutil, subprocess, tempfile, hashlib, hmac
+import argparse, json, os, pathlib, secrets, shutil, subprocess, tempfile, hashlib, hmac, fcntl
 
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
@@ -29,6 +29,8 @@ os.umask(0o077)
 home = pathlib.Path.home() / 'th-platform'
 for directory in ['config', 'state', 'run', 'apps', 'releases']:
     (home / directory).mkdir(parents=True, exist_ok=True, mode=0o700)
+deployment_lock = open(home/'deploy.lock','a')
+fcntl.flock(deployment_lock, fcntl.LOCK_EX)
 source = pathlib.Path(__file__).resolve().parents[1]
 release = home / 'releases' / args.image_tag
 release.mkdir(exist_ok=True, mode=0o700)
@@ -62,6 +64,7 @@ for app, token in config['tokens'].items():
 (home/'.env').write_text('IMAGE_TAG='+args.image_tag+'\nTH_PLATFORM_HOME='+str(home)+'\n')
 command = ['docker','compose','-p','th-platform','--env-file',str(home/'.env'),'-f',str(release/'compose.yaml')]
 run(*command,'pull')
+(home/'run/maintenance').write_text('Broker upgrade in progress\n')
 run(*command,'up','-d','--no-build')
 # Readiness is checked through the authenticated Unix socket without revealing tokens.
 check = '''const fs=require('node:fs'),http=require('node:http');
@@ -96,5 +99,6 @@ const packet=await brokerRequest(config,'/v1/event',{id});if(packet.events[0].ne
 console.log(JSON.stringify({serverSnapshot:id,verified:true}));'''
 result = run(*command,'exec','-T','storage','node','--input-type=module','-e',snapshot,input=json.dumps(backup),capture_output=True)
 print(result.stdout.strip())
+(home/'run/maintenance').unlink(missing_ok=True)
 atomic_json(home/'state/deployment.json', {'imageTag':args.image_tag,'release':str(release),'ready':True})
 print('Central storage broker is ready. Existing application providers were not changed.')

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createHash} from 'node:crypto';
-import {createWriteStream} from 'node:fs';
+import {createWriteStream,existsSync} from 'node:fs';
 import {rename,rm,mkdir,stat} from 'node:fs/promises';
 import {dirname,resolve,sep} from 'node:path';
 import {Transform} from 'node:stream';
@@ -29,10 +29,19 @@ export function brokerRequest({socketPath,token,application},path,value) {
   const bytes=Buffer.from(JSON.stringify(value));
   const req=http.request({socketPath,path,method:'POST',headers:{'Content-Type':'application/json','Content-Length':bytes.length,Authorization:`Bearer ${token}`,'X-TH-Application':application}},res=>{
    let data='';res.on('data',chunk=>{data+=chunk;if(data.length>4*1024*1024)res.destroy(Error('Broker response too large'));});
-   res.on('error',reject);res.on('end',()=>{try{const result=JSON.parse(data);if(res.statusCode!==200)throw Error(result.error||'Drive operation failed');resolve(result);}catch(error){reject(error);}});
+   res.on('error',reject);res.on('end',()=>{try{const result=JSON.parse(data);if(res.statusCode!==200)throw Object.assign(Error(result.error||'Drive operation failed'),{status:503,expose:true,code:'storage-unavailable'});resolve(result);}catch(error){reject(error);}});
   });
   req.setTimeout(300000,()=>req.destroy(Error('Drive commit outcome unknown; reconciliation required')));
-  req.on('error',reject);req.end(bytes);
+  req.on('error',()=>reject(Object.assign(Error('TH-Server storage is unavailable. Your save was not acknowledged; retry after recovery.'),{status:503,expose:true,code:'storage-unavailable'})));req.end(bytes);
+ });
+}
+
+export function brokerStream({socketPath,token,application},path,value){
+ return new Promise((resolveResponse,reject)=>{
+  const body=Buffer.from(JSON.stringify(value));
+  const request=http.request({socketPath,path,method:'POST',headers:{Authorization:`Bearer ${token}`,'X-TH-Application':application,'Content-Type':'application/json','Content-Length':body.length}},response=>{
+   if(response.statusCode!==200){response.resume();reject(Error('Google Photos selection is unavailable. Connect Photos and choose the image again.'));}else resolveResponse(response);
+  });request.setTimeout(60000,()=>request.destroy(Error('Google Photos download timed out')));request.on('error',reject);request.end(body);
  });
 }
 
@@ -45,7 +54,7 @@ export function driveFirstPool(pool,{commit,checkHead}={}) {
   const db=await pool.connect();let active=false,broken=false,finished=false;
   async function begin(){
    await db.query('BEGIN');active=true;
-   try{await db.query('SELECT public.th_storage_lock()');const {rows:[row]}=await db.query('SELECT public.th_storage_head() AS head');await checkHead(row.head);}
+   try{await db.query('SELECT public.th_storage_lock()');}
    catch(error){await db.query('ROLLBACK');active=false;throw error;}
   }
   async function complete(){
@@ -53,6 +62,7 @@ export function driveFirstPool(pool,{commit,checkHead}={}) {
    try{
     const {rows:[row]}=await db.query('SELECT public.th_storage_pending() AS pending');
     if(row.pending.events.length){
+     await checkHead(row.pending.parent);
      const id=randomUUID();const result=await commit({schemaVersion:1,id,...row.pending});
      if(result?.id!==id||result?.committed!==true)throw Error('Invalid Drive acknowledgement');
      await db.query('SELECT public.th_storage_ack($1)',[id]);
@@ -89,7 +99,10 @@ export function managedPool(pool,application,env=process.env){
  if(!env.TH_STORAGE_TOKEN||!env.TH_STORAGE_SOCKET)throw Error('Central storage connection is required');
  const config={socketPath:env.TH_STORAGE_SOCKET,token:env.TH_STORAGE_TOKEN,application};
  return driveFirstPool(pool,{
-  checkHead:parent=>brokerRequest(config,'/v1/check',{parent}),
+  checkHead:parent=>{
+   if(existsSync(resolve(dirname(config.socketPath),'maintenance'))||existsSync(resolve(dirname(config.socketPath),'maintenance-'+application)))throw Error('Storage maintenance in progress');
+   return brokerRequest(config,'/v1/check',{parent});
+  },
   commit:value=>brokerRequest(config,'/v1/commit',value)
  });
 }

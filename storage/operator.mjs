@@ -3,7 +3,13 @@ import {brokerRequest} from './client.mjs';
 import {attachmentReferences} from './attachments.mjs';
 const quote=value=>'"'+value.replaceAll('"','""')+'"';
 const qualified=(schema,table)=>quote(schema)+'.'+quote(table);
-const allowed=table=>['public','portfolio','mes_private'].includes(table.schema)&&!['schema_migrations','ai_schema_migrations'].includes(table.table);
+const migrationTables=['schema_migrations','portfolio_schema_migrations','ai_schema_migrations'];
+const allowed=table=>['public','portfolio','mes_private'].includes(table.schema)&&!migrationTables.includes(table.table);
+async function migrations(db){
+ const result={};
+ for(const name of migrationTables){const {rows:[exists]}=await db.query('SELECT to_regclass($1) AS name',['public.'+name]);if(exists.name)result[name]=(await db.query(`SELECT row_to_json(t)::text AS data FROM public.${quote(name)} t ORDER BY row_to_json(t)::text COLLATE "C"`)).rows.map(row=>row.data);}
+ return result;
+}
 
 export async function baseline(db,broker){
  await db.query('BEGIN');
@@ -11,14 +17,14 @@ export async function baseline(db,broker){
   await db.query('SELECT public.th_storage_lock()');
   // Operator must stop all application/background writers before invoking this.
   const {history}=await broker('/v1/history',{});const parent=history.at(-1)?.id??null;
-  const {rows:tables}=await db.query("select schemaname as schema,tablename as table from pg_tables where schemaname in ('public','portfolio','mes_private') and tablename not in ('schema_migrations','ai_schema_migrations') order by schemaname,tablename");
+  const {rows:tables}=await db.query("select schemaname as schema,tablename as table from pg_tables where schemaname in ('public','portfolio','mes_private') and tablename not in ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations') order by schemaname,tablename");
   const events=[];
   for(const table of tables){
    const rows=await db.query(`SELECT row_to_json(t)::text AS data FROM ${qualified(table.schema,table.table)} t ORDER BY row_to_json(t)::text COLLATE "C"`);
    for(const row of rows.rows)events.push({...table,action:'BASELINE',old:null,new:row.data});
   }
   const {rows:sequences}=await db.query("select schemaname as schema,sequencename as name,last_value from pg_sequences where schemaname in ('public','portfolio','mes_private') order by schemaname,sequencename");
-  const metadata={tables,sequences};
+  const metadata={tables,sequences,migrations:await migrations(db),release:process.env.TH_RELEASE||null};
   // Empty databases still have a durable baseline and explicit table inventory.
   events.push({schema:'server',table:'manifest',action:'BASELINE',old:null,new:JSON.stringify({kind:'database-baseline',...metadata})});
   const id=randomUUID();const result=await broker('/v1/commit',{schemaVersion:1,id,parent,events,baseline:metadata});
@@ -38,6 +44,7 @@ export async function restore(db,broker,{confirmEmpty=false,restoreFile}={}){
  if(start<0)throw Error('No baseline in Drive history');
  const base=packets[start].baseline;
  if(!Array.isArray(base.tables)||base.tables.some(table=>!allowed(table)))throw Error('Invalid baseline inventory');
+ if(JSON.stringify(base.migrations||{})!==JSON.stringify(await migrations(db)))throw Error('Recovery schema migrations differ; use the baseline application release');
  await db.query('BEGIN');
  try{
   await db.query('SELECT public.th_storage_lock()');

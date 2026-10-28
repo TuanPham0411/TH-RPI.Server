@@ -2,6 +2,7 @@ services:
   storage:
     image: ghcr.io/tuanpham0411/th-rpi-storage:${IMAGE_TAG:?Use a tested immutable image tag}
     restart: unless-stopped
+    stop_grace_period: 6m
     read_only: true
     mem_limit: 192m
     cpus: 0.5
