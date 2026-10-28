@@ -1,0 +1,22 @@
+name: Snapshot server configuration
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/server-snapshot.yml]
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+permissions: {contents: read}
+concurrency:
+  group: server-configuration-snapshot
+  cancel-in-progress: false
+jobs:
+  snapshot:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 15
+    steps:
+      - run: test "$SELECTED_RUNNER" = th-server
+        env: {SELECTED_RUNNER: '${{ runner.name }}'}
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python3 deploy/snapshot.py
