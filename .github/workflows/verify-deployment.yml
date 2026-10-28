@@ -1,3 +1,4 @@
+# Verify the final deployed revisions after all application rollouts.
 name: Verify live storage deployment
 on:
   push:
