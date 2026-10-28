@@ -6,27 +6,27 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '20 20 * * *'
-permissions: {contents: read, packages: read}
+permissions: {contents: read}
 concurrency:
   group: recovery-drill
   cancel-in-progress: false
 jobs:
   recovery:
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 30
-    env:
-      DOCKER_CONFIG: /tmp/th-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+    timeout-minutes: 45
     steps:
-      - run: test "$SELECTED_RUNNER" = th-server
-        env: {SELECTED_RUNNER: '${{ runner.name }}'}
-      - uses: actions/checkout@v5
-        with: {persist-credentials: false}
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore into disposable databases and compare rows
+      - name: Restore remote schema, JSON data and referenced files
+        env:
+          SELECTED_RUNNER: '${{ runner.name }}'
+          SOURCE_SHA: '${{ github.sha }}'
         run: |
-          python3 deploy/snapshot.py
-          python3 deploy/recovery-drill.py
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = th-server
+          umask 077
+          tools_dir="$(mktemp -d "$RUNNER_TEMP/th-recovery.XXXXXX")"
+          trap 'rm -rf "$tools_dir"' EXIT
+          for script in snapshot.py recovery-drill.py; do
+            curl --fail --silent --show-error --location --retry 3 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/$SOURCE_SHA/deploy/$script" -o "$tools_dir/$script"
+          done
+          python3 "$tools_dir/snapshot.py"
+          python3 "$tools_dir/recovery-drill.py"

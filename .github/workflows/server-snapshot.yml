@@ -13,10 +13,17 @@ concurrency:
 jobs:
   snapshot:
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - run: test "$SELECTED_RUNNER" = th-server
-        env: {SELECTED_RUNNER: '${{ runner.name }}'}
-      - uses: actions/checkout@v5
-        with: {persist-credentials: false}
-      - run: python3 deploy/snapshot.py
+      - name: Persist changed server configuration as encrypted Drive JSON
+        env:
+          SELECTED_RUNNER: '${{ runner.name }}'
+          SOURCE_SHA: '${{ github.sha }}'
+        run: |
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = th-server
+          umask 077
+          snapshot_script="$(mktemp "$RUNNER_TEMP/th-snapshot.XXXXXX.py")"
+          trap 'rm -f "$snapshot_script"' EXIT
+          curl --fail --silent --show-error --location --retry 3 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/$SOURCE_SHA/deploy/snapshot.py" -o "$snapshot_script"
+          python3 "$snapshot_script"

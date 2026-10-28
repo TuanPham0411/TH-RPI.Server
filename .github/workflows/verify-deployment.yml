@@ -17,7 +17,7 @@ jobs:
       - name: Verify application modes and runtime-role Drive commits
         run: |
           python3 - <<'PYTHON'
-          import json,pathlib,subprocess,fcntl
+          import json,pathlib,subprocess,fcntl,urllib.parse
           home=pathlib.Path.home()/'th-platform'
           lock=open(home/'deploy.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
           apps=[
@@ -42,5 +42,13 @@ jobs:
               response=subprocess.run(['curl','--fail','--silent','--show-error','--retry','3','--max-time','30',url],capture_output=True)
               if response.returncode:raise SystemExit('Public route failed for '+app+': '+response.stderr.decode()[-200:])
               print(json.dumps({'application':app,'publicHTTP':200,**proof}),flush=True)
+          owner=json.loads(subprocess.check_output(['curl','--fail','--silent','--show-error','--max-time','30','https://ai.th.io.vn/api/auth/session']))
+          if owner.get('authenticated') is not False:raise SystemExit('Anonymous owner session response differs')
+          headers=subprocess.check_output(['curl','--silent','--show-error','--head','--max-time','30','https://ai.th.io.vn/api/oauth/start'],text=True)
+          location=next((line.split(':',1)[1].strip() for line in headers.splitlines() if line.lower().startswith('location:')),None)
+          target=urllib.parse.urlparse(location or '')
+          query=urllib.parse.parse_qs(target.query)
+          if target.hostname!='accounts.google.com' or query.get('redirect_uri')!=['https://ai.th.io.vn/api/oauth/callback'] or query.get('code_challenge_method')!=['S256']:raise SystemExit('Owner OAuth redirect is not ready')
+          print(json.dumps({'ownerAuthenticationAvailable':True,'ownerConsentStillRequired':True}),flush=True)
           print(json.dumps({'driveRoot':json.loads((home/'state/drive-root.json').read_text())['folderId'],'allApplicationsVerified':True}))
           PYTHON
