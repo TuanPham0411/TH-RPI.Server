@@ -27,4 +27,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Restore into disposable databases and compare rows
-        run: python3 deploy/recovery-drill.py
+        run: |
+          python3 deploy/snapshot.py
+          python3 deploy/recovery-drill.py

@@ -63,9 +63,9 @@ redirect `https://ai.th.io.vn/api/oauth/callback`; no Drive or Google token reac
 the browser. AI prompts remain local until the owner explicitly saves a draft.
 
 `deploy/recovery-drill.py` verifies recovery nightly using the deployed release.
-It clones schema definitions and migration catalogs into a uniquely named,
-disposable database, then restores all business rows and referenced files from
-Drive. Downloaded files go to the temporary operator container, never over the
+It reads schema definitions and migration catalogs from the encrypted server
+snapshot on Drive into a uniquely named, disposable database, then restores all
+business rows and referenced files from Drive. Downloaded files go to the temporary operator container, never over the
 live media volume. Foreign keys and file checksums must pass; when the live Drive
 head remains unchanged, all rows must match exactly. The disposable database is
 removed afterward. Results are recorded under `~/th-platform/state/`.
@@ -76,3 +76,9 @@ baseline, and access to the Drive account. Store that key in your password manag
 keeping the only key on the Pi would make encrypted account/configuration rows
 unrecoverable after device loss. This is application-data recovery, not a disk
 image of the operating system.
+
+Server configuration is checked every 30 minutes; changed configuration, database
+schema SQL and migration catalogs are stored inside encrypted JSON on Drive. The
+nightly recovery workflow takes a fresh snapshot first and uses those remote
+definitions, rather than relying on a surviving production schema. This schedule
+protects host configuration separately from synchronous application saves.

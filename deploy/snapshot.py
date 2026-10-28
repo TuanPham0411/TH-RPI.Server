@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Version server configuration as an encrypted Drive ledger record, only on change."""
-import fcntl,hashlib,http.client,json,os,pathlib,socket,time,uuid
+import fcntl,hashlib,http.client,json,os,pathlib,socket,subprocess,time,uuid
 home=pathlib.Path.home()/'th-platform'
 os.umask(0o077)
 lock=open(home/'deploy.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
@@ -29,7 +29,21 @@ for path in paths:
  try:
   if path.is_file() and not path.is_symlink() and path.stat().st_size<=1024*1024:files[str(path)]=path.read_text()
  except (PermissionError,UnicodeError):pass
-snapshot={'kind':'server-configuration','files':files}
+databases={}
+for app,service,database in [('ai-agent','db','th_ai'),('portfolio','database','th_portfolio'),('mes-ticket','database','mes_ticket')]:
+ state=json.loads((home/'state'/(app+'-deployment.json')).read_text())
+ container=app+'-'+service+'-1'
+ def dump(*arguments):
+  result=subprocess.run(['docker','exec',container,'pg_dump','-U','postgres',*arguments,database],capture_output=True,text=True)
+  if result.returncode:raise SystemExit('Database schema snapshot failed; existing data retained')
+  return '\n'.join(line for line in result.stdout.splitlines() if not line.startswith(('\\restrict ', '\\unrestrict ')))+'\n'
+ catalogs=[]
+ for name in ['schema_migrations','portfolio_schema_migrations','ai_schema_migrations']:
+  result=subprocess.run(['docker','exec',container,'psql','-X','-U','postgres','-d',database,'-At','-c',"SELECT to_regclass('public."+name+"') IS NOT NULL"],capture_output=True,text=True)
+  if result.returncode:raise SystemExit('Migration catalog snapshot failed')
+  if result.stdout.strip()=='t':catalogs.append(dump('--data-only','--table=public.'+name))
+ databases[app]={'release':state['imageTag'],'schema':dump('--schema-only','--clean','--if-exists'),'migrations':catalogs}
+snapshot={'kind':'server-configuration','files':files,'databases':databases}
 encoded=json.dumps(snapshot,sort_keys=True,separators=(',',':'))
 digest=hashlib.sha256(encoded.encode()).hexdigest();last=home/'state/server-snapshot-hash'
 if last.exists() and last.read_text()==digest:

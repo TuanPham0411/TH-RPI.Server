@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Restore Drive history into disposable databases without changing production rows."""
-import datetime,fcntl,hashlib,json,os,pathlib,subprocess,urllib.parse
+import datetime,fcntl,hashlib,http.client,json,os,pathlib,socket,subprocess,urllib.parse
 home=pathlib.Path.home()/'th-platform'
 os.umask(0o077)
 lock=open(home/'deploy.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
@@ -15,14 +15,38 @@ def sql(container,database,query):
 
 def quote(value):return '"'+value.replace('"','""')+'"'
 
+config=json.loads((home/'config/runtime.json').read_text())
+class UnixConnection(http.client.HTTPConnection):
+ def connect(self):
+  self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);self.sock.settimeout(300);self.sock.connect(str(home/'run/storage.sock'))
+def broker(path,value):
+ connection=UnixConnection('localhost',timeout=300)
+ try:
+  connection.request('POST',path,body=json.dumps(value).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+config['tokens']['server'],'X-TH-Application':'server'})
+  response=connection.getresponse();result=json.loads(response.read())
+  if response.status!=200:raise RuntimeError('Drive recovery metadata unavailable')
+  return result
+ finally:connection.close()
+snapshot=None
+for marker in reversed(broker('/v1/history',{})['history']):
+ packet=broker('/v1/event',{'id':marker['id']})
+ for event in packet['events']:
+  if event['table']=='credentials' and event['new']:
+   record=json.loads(event['new'])
+   if record.get('kind')=='server-configuration' and record.get('databases'):snapshot=record;break
+ if snapshot:break
+if not snapshot:raise RuntimeError('Run the server configuration snapshot before recovery verification')
+
 for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-operator.js'),('portfolio','database','th_portfolio','dist/server/storage-operator.cjs'),('mes-ticket','database','mes_ticket','dist/server/storage-operator.cjs')]:
  state=json.loads((home/'state'/(app+'-deployment.json')).read_text())
  if not state.get('ready') or not state.get('driveFirst'):raise RuntimeError('Application cutover is not ready')
  release=pathlib.Path(state['release']);container=app+'-'+service+'-1'
  target='th_recovery_'+app.replace('-','_')+'_'+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
  source_head=sql(container,database,'SELECT public.th_storage_head()').strip()
- # Schema-only dump includes capture definitions, but no user data or ledger rows.
- schema=command(['docker','exec',container,'pg_dump','-U','postgres','--schema-only','-Fc',database])
+ # Both schema definitions and migration catalogs come from encrypted Drive JSON.
+ definition=snapshot['databases'][app]
+ if definition['release']!=state['imageTag']:raise RuntimeError('Snapshot the deployed schema before recovery verification')
+ schema=definition['schema'].encode()
  tables=json.loads(sql(container,database,"SELECT coalesce(json_agg(json_build_object('schema',schemaname,'table',tablename) ORDER BY schemaname,tablename),'[]') FROM pg_tables WHERE schemaname IN ('public','portfolio','mes_private') AND tablename NOT IN ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations')"))
  credentials=json.loads(command(['docker','inspect',container]))[0]['Config']['Env']
  password=next(item.split('=',1)[1] for item in credentials if item.startswith('POSTGRES_PASSWORD='))
@@ -31,11 +55,9 @@ for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-o
  created=False
  try:
   command(['docker','exec',container,'createdb','-U','postgres',target]);created=True
-  command(['docker','exec','-i',container,'pg_restore','--exit-on-error','--clean','--if-exists','-U','postgres','-d',target],input=schema)
-  for name in ['schema_migrations','portfolio_schema_migrations','ai_schema_migrations']:
-   if sql(container,database,"SELECT to_regclass('public."+name+"') IS NOT NULL").strip()==b't':
-    data=command(['docker','exec',container,'pg_dump','-U','postgres','--data-only','--table=public.'+name,database])
-    command(['docker','exec','-i',container,'psql','-X','-v','ON_ERROR_STOP=1','-U','postgres','-d',target],input=data)
+  command(['docker','exec','-i',container,'psql','-X','-v','ON_ERROR_STOP=1','-U','postgres','-d',target],input=schema)
+  for catalog in definition['migrations']:
+   command(['docker','exec','-i',container,'psql','-X','-v','ON_ERROR_STOP=1','-U','postgres','-d',target],input=catalog.encode())
   sql(container,target,'INSERT INTO th_storage.head(id,operation,enforced) VALUES(true,null,false)')
   command(base+['run','--rm','--no-deps','-e','DATABASE_URL','-e','FILES_ROOT=/tmp/th-recovery-files','migrate','node',operator,'restore-empty'],env=environment)
   recovered_head=sql(container,target,'SELECT public.th_storage_head()').strip()
