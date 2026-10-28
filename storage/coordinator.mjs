@@ -7,10 +7,11 @@ const privateTable=/user|session|token|credential|grant|account/;
 const privateField=/"(?:password|password_hash|secret|refreshToken|accessToken|smtp_url)"\s*:/i;
 
 export class Coordinator {
- constructor({transport,wrappingSecret,attachment}){
-  if(!wrappingSecret||wrappingSecret.length<16)throw Error('Recovery wrapping secret required');
-  this.transport=transport;this.attachment=attachment;
-  this.key=Buffer.from(hkdfSync('sha256',wrappingSecret,'th-data-storage-v1','private-database-fields',32));
+ constructor({transport,wrappingSecret,recoveryKey,attachment,onCommitted}){
+  if(!recoveryKey&&(!wrappingSecret||wrappingSecret.length<16))throw Error('Recovery wrapping secret required');
+  this.transport=transport;this.attachment=attachment;this.onCommitted=onCommitted;
+  this.key=recoveryKey?Buffer.from(recoveryKey,'hex'):Buffer.from(hkdfSync('sha256',wrappingSecret,'th-data-storage-v1','private-database-fields',32));
+  if(this.key.length!==32)throw Error('Invalid recovery key');
   this.heads=new Map();this.queues=new Map();
  }
  checkApp(app){if(!apps.has(app))throw Error('Unknown application');}
@@ -77,6 +78,7 @@ export class Coordinator {
   const markerBytes=encode(marker);await this.transport.put(receiptKey,markerBytes,'application/json');
   const confirmation=await this.transport.get(receiptKey);if(!confirmation?.equals(markerBytes))throw Error('Commit acknowledgement unavailable; retry same id');
   this.heads.set(app,input.id);
+  if(this.onCommitted)try{await this.onCommitted({application:app,events,files:JSON.parse(bytes).files,marker});}catch{console.error('Local mapping cache unavailable; Drive commit remains authoritative',{application:app});}
   return {id:input.id,committed:true};
  }
 }

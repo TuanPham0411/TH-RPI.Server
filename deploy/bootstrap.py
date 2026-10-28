@@ -2,7 +2,7 @@
 """One-time/repeatable broker deployment by the TH-Server management runner.
 Never prints Docker environment variables, OAuth credentials or application tokens.
 """
-import argparse, json, os, pathlib, secrets, shutil, subprocess, tempfile
+import argparse, json, os, pathlib, secrets, shutil, subprocess, tempfile, hashlib, hmac
 
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
@@ -51,6 +51,10 @@ else:
               'tokens':{name:secrets.token_hex(32) for name in ['ai-agent','portfolio','mes-ticket','server']}}
     atomic_json(config_path, config)
 atomic_json(home / 'config/drive-credentials.json', credentials)
+# Preserve a recovery key separately from the encrypted Drive account rows.
+prk = hmac.new(b'th-data-storage-v1', client_secret.encode(), hashlib.sha256).digest()
+recovery_key = hmac.new(prk, b'private-database-fields'+bytes([1]), hashlib.sha256).digest()
+(home/'config/recovery-key.txt').write_text(recovery_key.hex()+'\n')
 for app, token in config['tokens'].items():
     path = home / 'apps' / (app+'.env')
     path.write_text('TH_STORAGE_TOKEN='+token+'\nTH_STORAGE_RUN_DIR='+str(home/'run')+'\n')
@@ -72,5 +76,25 @@ for attempt in range(45):
 else:
     run(*command,'logs','--tail=30','storage')
     raise SystemExit('Broker is not ready; application storage modes were not changed')
+backup = {'platformConfig':config,'driveCredentials':credentials,'containers':{},'files':{}}
+for container in ['ai-agent-api-1','portfolio-portfolio-1','mes-ticket-mes-1']:
+    backup['containers'][container] = json.loads(run('docker','inspect',container,capture_output=True).stdout)[0]
+paths = [pathlib.Path('/etc/hostname'),pathlib.Path('/etc/hosts'),pathlib.Path('/etc/nginx/nginx.conf'),pathlib.Path('/etc/systemd/system/cloudflared.service')]
+paths += list(pathlib.Path('/etc/nginx/sites-available').glob('*'))
+paths += [pathlib.Path.home()/'apps'/name/'.env' for name in ['ai-agent','portfolio','mes-ticket']]
+for path in paths:
+    if path.is_file() and not path.is_symlink() and path.stat().st_size < 1024*1024:
+        try: backup['files'][str(path)] = path.read_text()
+        except (PermissionError,UnicodeError): pass
+backup['packages'] = run('dpkg-query','-W',capture_output=True).stdout
+snapshot = '''import {readFile} from 'node:fs/promises';import {randomUUID,createHash} from 'node:crypto';import {brokerRequest} from './storage/client.mjs';
+const c=JSON.parse(await readFile('/config/runtime.json','utf8'));let text='';for await(const chunk of process.stdin)text+=chunk;
+const config={socketPath:'/run/th-storage/storage.sock',token:c.tokens.server,application:'server'};
+const {history}=await brokerRequest(config,'/v1/history',{});const id=randomUUID();
+await brokerRequest(config,'/v1/commit',{schemaVersion:1,id,parent:history.at(-1)?.id??null,events:[{schema:'server',table:'credentials',action:'BASELINE',old:null,new:text}]});
+const packet=await brokerRequest(config,'/v1/event',{id});if(packet.events[0].new!==text)throw Error('Server recovery round trip differs');
+console.log(JSON.stringify({serverSnapshot:id,verified:true}));'''
+result = run(*command,'exec','-T','storage','node','--input-type=module','-e',snapshot,input=json.dumps(backup),capture_output=True)
+print(result.stdout.strip())
 atomic_json(home/'state/deployment.json', {'imageTag':args.image_tag,'release':str(release),'ready':True})
 print('Central storage broker is ready. Existing application providers were not changed.')

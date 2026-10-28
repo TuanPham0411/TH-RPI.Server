@@ -60,7 +60,7 @@ jobs:
     runs-on: [self-hosted, Linux, ARM64]
     permissions: {contents: read, packages: read}
     env:
-      DOCKER_CONFIG: ${{ runner.temp }}/th-storage-registry
+      DOCKER_CONFIG: /tmp/th-storage-registry-${{ github.run_id }}-${{ github.run_attempt }}
     timeout-minutes: 10
     steps:
       - name: Verify management runner
