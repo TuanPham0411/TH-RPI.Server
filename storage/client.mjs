@@ -73,11 +73,12 @@ export function driveFirstPool(pool,{commit,checkHead}={}) {
   }
   return {
    async query(sql,params){
-    if(finished||broken)throw Error('Database transaction unavailable');
+    if(finished)throw Error('Database transaction unavailable');
     const command=(typeof sql==='string'?sql:sql.text).trim().replace(/;$/,'').toUpperCase();
+    if(command==='ROLLBACK'){if(active)await db.query('ROLLBACK');active=false;readOnly=false;return {rows:[],rowCount:0};}
+    if(broken)throw Error('Database transaction unavailable');
     if(command==='BEGIN'||command==='START TRANSACTION'){if(active)throw Error('Nested transaction not supported');await begin();return {rows:[],rowCount:0};}
     if(command==='COMMIT'){await complete();return {rows:[],rowCount:0};}
-    if(command==='ROLLBACK'){await db.query('ROLLBACK');active=false;return {rows:[],rowCount:0};}
     // Disallow hidden transaction control in batched statements. Repository
     // multi-statement housekeeping queries contain only DELETE statements.
     if(/(?:^|;)\s*(?:BEGIN|COMMIT|END|START\s+TRANSACTION|ROLLBACK)\b/i.test(typeof sql==='string'?sql:sql.text))throw Error('Use explicit transaction calls');
