@@ -1,0 +1,29 @@
+name: Diagnose Photos connection
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/photos-diagnostic.yml]
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect Photos failures without credentials
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess,json,pathlib,socket,http.client
+          data=subprocess.run(['docker','logs','--since','3h','th-platform-storage-1'],capture_output=True,text=True)
+          lines=(data.stdout+data.stderr).splitlines()
+          for i,line in enumerate(lines):
+              if 'Storage operation failed' in line:
+                  print('\n'.join(lines[i:i+7]))
+          config=json.loads((pathlib.Path.home()/'th-platform/config/runtime.json').read_text())
+          class Connection(http.client.HTTPConnection):
+              def connect(self):
+                  self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);self.sock.settimeout(30);self.sock.connect(str(pathlib.Path.home()/'th-platform/run/storage.sock'))
+          connection=Connection('localhost')
+          connection.request('POST','/v1/photos/status',body=b'{}',headers={'Authorization':'Bearer '+config['tokens']['portfolio'],'X-TH-Application':'portfolio','Content-Type':'application/json'})
+          response=connection.getresponse();value=json.loads(response.read())
+          print(json.dumps({'photosStatus':response.status,'connected':value.get('connected')}))
+          PYTHON
