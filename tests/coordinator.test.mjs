@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {Coordinator} from '../storage/coordinator.mjs';
+class Memory {
+ data=new Map();
+ async get(key){return this.data.has(key)?Buffer.from(this.data.get(key)):null;}
+ async list(prefix){return [...this.data.keys()].filter(key=>key.startsWith(prefix));}
+ async put(key,bytes){if(this.data.has(key)&&!this.data.get(key).equals(bytes))throw Error('Immutable conflict');this.data.set(key,Buffer.from(bytes));}
+}
+const input=extra=>({schemaVersion:1,id:randomUUID(),parent:null,events:[{schema:'portfolio',table:'content',action:'INSERT',old:null,new:'{"id":"main","large":9223372036854775807}'}],...extra});
+const make=transport=>new Coordinator({transport,wrappingSecret:'test-secret-not-a-production-credential'});
+test('restore verifies exact JSON including large integers',async()=>{const remote=new Memory(),store=make(remote),value=input();await store.commit('portfolio',value);const restored=make(remote);const history=await restored.history('portfolio');assert.equal((await restored.event('portfolio',history[0])).events[0].new,value.events[0].new);assert.equal(await restored.head('portfolio'),value.id);});
+test('credentials are encrypted with authenticated row context',async()=>{const remote=new Memory(),store=make(remote),value=input({events:[{schema:'portfolio',table:'users',action:'INSERT',old:null,new:'{"password":"sensitive-hash"}'}]});await store.commit('portfolio',value);assert.ok(!remote.data.get(`portfolio/events/${value.id}.json`).toString().includes('sensitive-hash'));const h=await store.history('portfolio');assert.equal((await store.event('portfolio',h[0])).events[0].new,value.events[0].new);await assert.rejects(new Coordinator({transport:remote,wrappingSecret:'a-different-recovery-wrapping-secret'}).event('portfolio',h[0]));});
+test('failed attachment cannot create an acknowledged event',async()=>{const remote=new Memory(),store=new Coordinator({transport:remote,wrappingSecret:'test-secret-not-a-production-credential',attachment:async()=>{throw Error('Upload failed');}});await assert.rejects(store.commit('portfolio',input()));assert.equal(await store.head('portfolio'),null);assert.equal((await remote.list('portfolio/commits/')).length,0);});
+test('same operation is idempotent but changed content is rejected',async()=>{const remote=new Memory(),store=make(remote),value=input();await store.commit('portfolio',value);await store.commit('portfolio',value);await assert.rejects(store.commit('portfolio',{...value,events:[{...value.events[0],new:'{"id":"other"}'}]}),/reused/);});
+test('stale PostgreSQL projection is rejected',async()=>{const store=make(new Memory());await store.commit('portfolio',input());await assert.rejects(store.check('portfolio',null),/recovery/);});
+test('partial receipt write can be retried after process restart',async()=>{const remote=new Memory(),put=remote.put.bind(remote);let fail=true;remote.put=async(key,bytes)=>{if(key.includes('/commits/')&&fail)throw Error('Offline');return put(key,bytes);};const value=input();await assert.rejects(make(remote).commit('portfolio',value));fail=false;await make(remote).commit('portfolio',value);assert.equal((await make(remote).history('portfolio')).length,1);});
+test('corruption and branched histories fail closed',async()=>{const remote=new Memory(),store=make(remote),value=input();await store.commit('portfolio',value);const head=(await store.history('portfolio'))[0];remote.data.set(`portfolio/events/${value.id}.json`,Buffer.from('{}'));await assert.rejects(store.event('portfolio',head),/corrupt/);const id=randomUUID();remote.data.set(`portfolio/commits/${id}.json`,Buffer.from(JSON.stringify({...head,id})));await assert.rejects(make(remote).history('portfolio'),/Multiple/);});

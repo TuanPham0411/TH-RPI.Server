@@ -1,0 +1,78 @@
+name: Build and deploy storage platform
+on:
+  push:
+    branches: [main, storage/platform]
+    paths: ['storage/**', 'tests/**', 'deploy/**', 'Dockerfile', 'compose.yaml', 'package*.json', '.github/workflows/platform.yml']
+  pull_request:
+    paths: ['storage/**', 'tests/**', 'deploy/**', 'Dockerfile', 'compose.yaml', 'package*.json', '.github/workflows/platform.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: storage-platform-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: storage_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v5
+        with: {node-version: '22', cache: npm}
+      - run: npm ci --ignore-scripts
+      - run: npm test
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:ci-test-only@127.0.0.1:5432/storage_test
+      - run: python3 -m py_compile deploy/bootstrap.py
+  image:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/tuanpham0411/th-rpi-storage:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/TuanPham0411/TH-RPI.Server
+  deploy-broker:
+    needs: image
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/storage/platform')
+    runs-on: [self-hosted, Linux, ARM64]
+    permissions: {contents: read, packages: read}
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/th-storage-registry
+    timeout-minutes: 10
+    steps:
+      - name: Verify management runner
+        env: {SELECTED_RUNNER: '${{ runner.name }}'}
+        run: test "$SELECTED_RUNNER" = th-server
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy management service
+        env: {TH_IMAGE_TAG: '${{ github.sha }}'}
+        run: python3 deploy/bootstrap.py --image-tag "$TH_IMAGE_TAG"

@@ -1,0 +1,26 @@
+services:
+  storage:
+    image: ghcr.io/tuanpham0411/th-rpi-storage:${IMAGE_TAG:?Use a tested immutable image tag}
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 192m
+    cpus: 0.5
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${TH_PLATFORM_HOME:?Platform home required}/config:/config:ro
+      - ${TH_PLATFORM_HOME:?Platform home required}/run:/run/th-storage
+      - ${TH_PLATFORM_HOME:?Platform home required}/state:/state
+      - ai:/source/ai:ro
+      - portfolio:/source/portfolio:ro
+      - mes:/source/mes:ro
+volumes:
+  ai:
+    external: true
+    name: ai-agent_ai-files
+  portfolio:
+    external: true
+    name: portfolio_media
+  mes:
+    external: true
+    name: mes-ticket_media
