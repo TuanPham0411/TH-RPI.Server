@@ -31,7 +31,7 @@ jobs:
       - run: npm test
         env:
           TEST_DATABASE_URL: postgresql://postgres:ci-test-only@127.0.0.1:5432/storage_test
-      - run: python3 -m py_compile deploy/bootstrap.py
+      - run: python3 -m py_compile deploy/*.py
   image:
     needs: test
     if: github.event_name != 'pull_request'
@@ -61,7 +61,7 @@ jobs:
     permissions: {contents: read, packages: read}
     env:
       DOCKER_CONFIG: /tmp/th-storage-registry-${{ github.run_id }}-${{ github.run_attempt }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Verify management runner
         env: {SELECTED_RUNNER: '${{ runner.name }}'}
