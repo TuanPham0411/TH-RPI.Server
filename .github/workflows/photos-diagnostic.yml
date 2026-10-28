@@ -12,7 +12,7 @@ jobs:
       - name: Inspect Photos failures without credentials
         run: |
           python3 - <<'PYTHON'
-          import subprocess,json,pathlib,socket,http.client
+          import subprocess,json,pathlib,socket,http.client,urllib.parse
           data=subprocess.run(['docker','logs','--since','3h','th-platform-storage-1'],capture_output=True,text=True)
           lines=(data.stdout+data.stderr).splitlines()
           for i,line in enumerate(lines):
@@ -26,4 +26,12 @@ jobs:
           connection.request('POST','/v1/photos/status',body=b'{}',headers={'Authorization':'Bearer '+config['tokens']['portfolio'],'X-TH-Application':'portfolio','Content-Type':'application/json'})
           response=connection.getresponse();value=json.loads(response.read())
           print(json.dumps({'photosStatus':response.status,'connected':value.get('connected')}))
+          connection.close()
+          if value.get('connected'):
+              connection=Connection('localhost')
+              connection.request('POST','/v1/photos/session',body=json.dumps({'binding':'a'*64}).encode(),headers={'Authorization':'Bearer '+config['tokens']['portfolio'],'X-TH-Application':'portfolio','Content-Type':'application/json'})
+              response=connection.getresponse();value=json.loads(response.read())
+              print(json.dumps({'pickerStatus':response.status,'pickerHost':urllib.parse.urlparse(value.get('pickerUri','')).hostname,'error':value.get('error')}))
+              if response.status!=200:raise SystemExit('Google Photos Picker API probe failed')
+          
           PYTHON
