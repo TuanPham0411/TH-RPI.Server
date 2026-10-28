@@ -51,15 +51,16 @@ export function brokerStream({socketPath,token,application},path,value){
 export function driveFirstPool(pool,{commit,checkHead}={}) {
  if(typeof commit!=='function'||typeof checkHead!=='function')throw Error('Broker callbacks required');
  async function connection(){
-  const db=await pool.connect();let active=false,broken=false,finished=false;
-  async function begin(){
-   await db.query('BEGIN');active=true;
-   try{await db.query('SELECT public.th_storage_lock()');}
+  const db=await pool.connect();let active=false,readOnly=false,broken=false,finished=false;
+  async function begin(read=false){
+   await db.query(read?'BEGIN READ ONLY':'BEGIN');active=true;readOnly=read;
+   try{if(!readOnly)await db.query('SELECT public.th_storage_lock()');}
    catch(error){await db.query('ROLLBACK');active=false;throw error;}
   }
   async function complete(){
    if(!active)throw Error('No active transaction');
    try{
+    if(readOnly){await db.query('COMMIT');active=false;readOnly=false;return;}
     const {rows:[row]}=await db.query('SELECT public.th_storage_pending() AS pending');
     if(row.pending.events.length){
      await checkHead(row.pending.parent);
@@ -80,7 +81,12 @@ export function driveFirstPool(pool,{commit,checkHead}={}) {
     // Disallow hidden transaction control in batched statements. Repository
     // multi-statement housekeeping queries contain only DELETE statements.
     if(/(?:^|;)\s*(?:BEGIN|COMMIT|END|START\s+TRANSACTION|ROLLBACK)\b/i.test(typeof sql==='string'?sql:sql.text))throw Error('Use explicit transaction calls');
-    const implicit=!active;if(implicit)await begin();
+    const implicit=!active;
+    const text=typeof sql==='string'?sql:sql.text;
+    const simpleRead=/^\s*SELECT\b/i.test(text)&&!/[;]\s*\S/.test(text)&&!/\bpublic\.(?:"[^"]+"|\w+)\s*\(/i.test(text)&&!/\bFOR\s+(?:UPDATE|SHARE|NO\s+KEY\s+UPDATE|KEY\s+SHARE)\b/i.test(text);
+    // PostgreSQL itself enforces READ ONLY. Unexpected side-effecting functions
+    // fail instead of bypassing capture; explicit/public function calls are gated.
+    if(implicit)await begin(simpleRead);
     try{const result=await db.query(sql,params);if(implicit)await complete();return result;}
     catch(error){if(implicit){await db.query('ROLLBACK').catch(()=>{});active=false;}throw error;}
    },

@@ -59,6 +59,7 @@ try:
   if response.returncode==0: ready=True;break
   time.sleep(2)
  if not ready: raise RuntimeError('Application readiness failed; database and media volumes retained')
+ run(command+['run','--rm','--no-deps','migrate','node',app['operator'],'probe'])
  run(['curl','--fail','--silent','--show-error','--retry','3','--max-time','20','https://'+app['domain']+'/'],stdout=subprocess.DEVNULL)
  state={'application':args.application,'imageTag':args.image_tag,'release':str(release),'backup':str(backup),'driveFirst':True,'ready':True}
  temporary=home/'state'/(args.application+'-deployment.tmp');temporary.write_text(json.dumps(state));temporary.replace(home/'state'/(args.application+'-deployment.json'))

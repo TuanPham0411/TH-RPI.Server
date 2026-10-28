@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {brokerRequest} from './client.mjs';
+import {brokerRequest,driveFirstPool} from './client.mjs';
 import {attachmentReferences} from './attachments.mjs';
 const quote=value=>'"'+value.replaceAll('"','""')+'"';
 const qualified=(schema,table)=>quote(schema)+'.'+quote(table);
@@ -95,3 +95,14 @@ async function verifyForeignKeys(db){
 }
 
 export function operatorBroker(application,env=process.env){return (path,value)=>brokerRequest({application,socketPath:env.TH_STORAGE_SOCKET,token:env.TH_STORAGE_TOKEN},path,value);}
+
+export async function verifyWriteThrough(pool,broker){
+ let operation;
+ const guarded=driveFirstPool(pool,{checkHead:parent=>broker('/v1/check',{parent}),commit:async input=>{operation=input.id;return broker('/v1/commit',input);}});
+ const db=await guarded.connect(),id=randomUUID();
+ try{await db.query('BEGIN');await db.query('INSERT INTO public.th_storage_probe(id,value) VALUES($1,$2)',[id,{purpose:'drive-first-verification'}]);await db.query('DELETE FROM public.th_storage_probe WHERE id=$1',[id]);await db.query('COMMIT');}
+ catch(error){await db.query('ROLLBACK').catch(()=>{});throw error;}finally{db.release();}
+ const packet=await broker('/v1/event',{id:operation});
+ if(packet.events.length!==2||packet.events[0].table!=='th_storage_probe'||packet.events[1].action!=='DELETE')throw Error('Write-through verification differs');
+ return {driveFirstVerified:true,operation};
+}

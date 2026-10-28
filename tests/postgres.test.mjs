@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import pg from 'pg';
 import {Coordinator} from '../storage/coordinator.mjs';
 import {driveFirstPool} from '../storage/client.mjs';
-import {baseline,restore} from '../storage/operator.mjs';
+import {baseline,restore,verifyWriteThrough} from '../storage/operator.mjs';
 
 class Memory {data=new Map();async get(key){return this.data.has(key)?Buffer.from(this.data.get(key)):null;}async put(key,bytes){if(this.data.has(key)&&!this.data.get(key).equals(bytes))throw Error('Immutable conflict');this.data.set(key,Buffer.from(bytes));}async list(prefix){return [...this.data.keys()].filter(x=>x.startsWith(prefix));}}
 test('PostgreSQL capture, Drive-first commit, rollback and empty-database restore',{skip:!process.env.TEST_DATABASE_URL},async()=>{
@@ -18,7 +18,7 @@ test('PostgreSQL capture, Drive-first commit, rollback and empty-database restor
  const capture=await readFile(new URL('../storage/capture.sql',import.meta.url),'utf8');
  const schema=`CREATE SCHEMA mes_private;CREATE TABLE public.records(id bigint generated always as identity primary key,value jsonb not null);CREATE TABLE mes_private.users(id text primary key,password text not null,record bigint references public.records(id));`;
  const remote=new Memory(),coordinator=new Coordinator({transport:remote,wrappingSecret:'isolated-test-secret-for-integration'});
- const broker=async(path,value)=>{if(path==='/v1/history')return {history:await coordinator.history('mes-ticket')};if(path==='/v1/event')return coordinator.event('mes-ticket',(await coordinator.history('mes-ticket')).find(x=>x.id===value.id));if(path==='/v1/commit')return coordinator.commit('mes-ticket',value);throw Error('Unknown path');};
+ const broker=async(path,value)=>{if(path==='/v1/check')return coordinator.check('mes-ticket',value.parent);if(path==='/v1/history')return {history:await coordinator.history('mes-ticket')};if(path==='/v1/event')return coordinator.event('mes-ticket',(await coordinator.history('mes-ticket')).find(x=>x.id===value.id));if(path==='/v1/commit')return coordinator.commit('mes-ticket',value);throw Error('Unknown path');};
  try{
   await source.query(schema);await recovery.query(schema);await source.query(capture);await recovery.query(capture);
   await source.query("INSERT INTO public.records(value) VALUES('{\"large\":9223372036854775807}')");
@@ -28,6 +28,7 @@ test('PostgreSQL capture, Drive-first commit, rollback and empty-database restor
   const guarded=driveFirstPool(source,{checkHead:parent=>coordinator.check('mes-ticket',parent),commit:value=>coordinator.commit('mes-ticket',value)});
   await guarded.query("UPDATE public.records SET value='{\"large\":9223372036854775806}' WHERE id=1");
   const transaction=await guarded.connect();await transaction.query('BEGIN');await transaction.query("INSERT INTO public.records(value) VALUES('{\"new\":true}')");await transaction.query("INSERT INTO mes_private.users VALUES('other','other-hash',currval(pg_get_serial_sequence('public.records','id')))");await transaction.query('COMMIT');transaction.release();
+  assert.equal((await verifyWriteThrough(source,broker)).driveFirstVerified,true);
   const bad=driveFirstPool(source,{checkHead:parent=>coordinator.check('mes-ticket',parent),commit:async()=>{throw Error('Drive offline');}});
   await assert.rejects(bad.query("DELETE FROM mes_private.users WHERE id='owner'"),/offline/);
   assert.equal((await source.query("SELECT count(*) FROM mes_private.users WHERE id='owner'")).rows[0].count,'1');

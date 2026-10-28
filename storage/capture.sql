@@ -10,6 +10,7 @@ create table if not exists th_storage.events(
  schema_name text not null,table_name text not null,operation text not null,
  old_row text,new_row text
 );
+create table if not exists public.th_storage_probe(id text primary key,value jsonb not null);
 create or replace function th_storage.capture() returns trigger
 language plpgsql security definer set search_path=pg_catalog,th_storage as $$
 begin
@@ -53,6 +54,7 @@ do $$ declare r text; begin
  foreach r in array array['th_api','th_ai_api'] loop
   if exists(select 1 from pg_roles where rolname=r) then
    execute format('grant execute on function public.th_storage_pending(),public.th_storage_ack(text),public.th_storage_lock(),public.th_storage_head() to %I',r);
+   execute format('grant select,insert,update,delete on public.th_storage_probe to %I',r);
   end if;
  end loop;
 end $$;
