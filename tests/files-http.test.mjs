@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,symlink,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,symlink,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import http from 'node:http';
 import {confinedFile,attachmentWriter} from '../storage/attachments.mjs';
 import {storageServer} from '../storage/http.mjs';
+import {cachedFilePath,managedPool} from '../storage/client.mjs';
 
 test('media streaming adapter rejects symlinks and mismatched sizes',async()=>{
  const root=await mkdtemp(join(tmpdir(),'th-media-'));try{
@@ -23,4 +24,16 @@ test('Unix broker rejects missing credentials and cross-application tokens',asyn
  await new Promise(resolve=>server.listen(socket,resolve));
  const request=(application,token)=>new Promise((resolve,reject)=>{const body='{"parent":null}';const req=http.request({socketPath:socket,path:'/v1/check',method:'POST',headers:{'X-TH-Application':application,Authorization:`Bearer ${token}`,'Content-Length':Buffer.byteLength(body)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);req.end(body);});
  try{assert.equal(await request('portfolio','mes-only'),403);assert.equal(await request('portfolio','portfolio-only'),200);assert.equal(await request('server','portfolio-only'),403);}finally{await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true});}
+});
+test('missing cache is restored from the exact local projection version and then read locally',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'th-cache-')),socket=join(root,'broker.sock');
+ const sha256='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';let reads=0;
+ const file={id:'drive-object',path:'images/photo',sha256,size:3};
+ const coordinator={history:async()=>[{id:'local-head'},{id:'newer-head'}],event:async(app,marker)=>{reads++;return {files:marker.id==='local-head'?[file]:[]};},transport:{request:async()=>new Response(Buffer.from('abc'),{status:200})}};
+ const server=storageServer({coordinator,tokens:{portfolio:'private-app-token'}});await new Promise(resolve=>server.listen(socket,resolve));
+ managedPool({query:async()=>({rows:[{head:'local-head'}]})},'portfolio',{TH_STORAGE_MODE:'drive-first',TH_STORAGE_TOKEN:'private-app-token',TH_STORAGE_SOCKET:socket});
+ try{
+  const path=await cachedFilePath(root,'images/photo');assert.equal((await readFile(path)).toString(),'abc');
+  const previous=reads;assert.equal(await cachedFilePath(root,'images/photo'),path);assert.equal(reads,previous);
+ }finally{await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true});}
 });

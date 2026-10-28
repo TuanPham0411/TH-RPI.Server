@@ -2,10 +2,25 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {createHash} from 'node:crypto';
 import {createWriteStream,existsSync} from 'node:fs';
-import {rename,rm,mkdir,stat} from 'node:fs/promises';
+import {link,rm,mkdir,stat,access} from 'node:fs/promises';
 import {dirname,resolve,sep} from 'node:path';
 import {Transform} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
+let mediaCache;
+const downloads=new Map();
+
+export async function cachedFilePath(root,relative,write=false){
+ const base=resolve(root),path=resolve(base,relative);
+ if(typeof relative!=='string'||relative.split(/[\\/]/).some(x=>!x||x==='.'||x==='..')||!path.startsWith(base+sep))throw Error('Invalid media path');
+ if(write||!mediaCache)return path;
+ try{await access(path);return path;}catch(error){if(error.code!=='ENOENT')throw error;}
+ if(!downloads.has(path))downloads.set(path,(async()=>{
+  const {rows:[row]}=await mediaCache.pool.query('SELECT public.th_storage_head() AS head');
+  const reference=await brokerRequest(mediaCache.config,'/v1/resolve-file',{path:relative,head:row.head});
+  return downloadFile(mediaCache.config,reference,base);
+ })().finally(()=>downloads.delete(path)));
+ return downloads.get(path);
+}
 
 export async function downloadFile(config,reference,root){
  if(typeof reference.path!=='string'||reference.path.split(/[\\/]/).some(x=>!x||x==='.'||x==='..')||reference.path.startsWith('/')||!/^[a-f0-9]{64}$/.test(reference.sha256))throw Error('Invalid recovery file');
@@ -20,7 +35,8 @@ export async function downloadFile(config,reference,root){
   const digest=createHash('sha256');let size=0;
   await pipeline(response,new Transform({transform(chunk,encoding,callback){size+=chunk.length;digest.update(chunk);callback(size>reference.size?Error('Recovery file size differs'):null,chunk);}}),createWriteStream(temporary,{flags:'wx',mode:0o600}));
   if(size!==reference.size||digest.digest('hex')!==reference.sha256)throw Error('Recovery file checksum differs');
-  await rename(temporary,path);return path;
+  // Publish exclusively: never replace an existing file during recovery.
+  await link(temporary,path);return path;
  }finally{await rm(temporary,{force:true});}
 }
 
@@ -105,11 +121,12 @@ export function managedPool(pool,application,env=process.env){
  if(env.TH_STORAGE_MODE!=='drive-first')return pool;
  if(!env.TH_STORAGE_TOKEN||!env.TH_STORAGE_SOCKET)throw Error('Central storage connection is required');
  const config={socketPath:env.TH_STORAGE_SOCKET,token:env.TH_STORAGE_TOKEN,application};
- return driveFirstPool(pool,{
+ const wrapped=driveFirstPool(pool,{
   checkHead:parent=>{
    if(existsSync(resolve(dirname(config.socketPath),'maintenance'))||existsSync(resolve(dirname(config.socketPath),'maintenance-'+application)))throw Error('Storage maintenance in progress');
    return brokerRequest(config,'/v1/check',{parent});
   },
   commit:value=>brokerRequest(config,'/v1/commit',value)
  });
+ mediaCache={config,pool};return wrapped;
 }

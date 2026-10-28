@@ -10,7 +10,7 @@ export function storageServer({coordinator,tokens,photos,status}){
   const respond=(status,value)=>{res.statusCode=status;res.end(JSON.stringify(value));};
   if(!Object.hasOwn(tokens,app||'')||!equal(req.headers.authorization,`Bearer ${tokens[app]}`))return respond(403,{error:'Storage authentication required'});
   const photosOperation=req.url.startsWith('/v1/photos/');
-  if(req.method!=='POST'||!photosOperation&&!['/v1/check','/v1/commit','/v1/history','/v1/event','/v1/file','/v1/status'].includes(req.url))return respond(404,{error:'Unknown storage operation'});
+  if(req.method!=='POST'||!photosOperation&&!['/v1/check','/v1/commit','/v1/history','/v1/event','/v1/file','/v1/resolve-file','/v1/status'].includes(req.url))return respond(404,{error:'Unknown storage operation'});
   if(photosOperation&&(app!=='portfolio'||!photos))return respond(403,{error:'Google Photos belongs to Portfolio only'});
   try{
    const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16*1024*1024){respond(413,{error:'Storage batch too large'});return;}chunks.push(chunk);}
@@ -34,6 +34,15 @@ export function storageServer({coordinator,tokens,photos,status}){
    if(req.url==='/v1/check')return respond(200,await coordinator.check(app,body.parent));
    if(req.url==='/v1/commit')return respond(200,await coordinator.commit(app,body));
    if(req.url==='/v1/history')return respond(200,{history:await coordinator.history(app)});
+   if(req.url==='/v1/resolve-file'){
+    const history=await coordinator.history(app),position=history.findIndex(marker=>marker.id===body.head);
+    if(position<0)return respond(409,{error:'Local projection has no recoverable Drive head'});
+    for(const marker of history.slice(0,position+1).reverse()){
+     const packet=await coordinator.event(app,marker);const file=packet.files.find(value=>value.path===body.path);
+     if(file)return respond(200,file);
+    }
+    return respond(404,{error:'File has no committed Drive mapping'});
+   }
    if(req.url==='/v1/file'){
     const history=await coordinator.history(app);let file;
     for(const marker of history.reverse()){
