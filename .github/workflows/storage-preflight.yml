@@ -20,11 +20,16 @@ jobs:
           set -eu
           id -un
           free -m
-          if ! sudo -n docker info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}'; then
+          docker_cmd=(docker)
+          if docker info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}' 2>/dev/null; then
+            :
+          elif sudo -n docker info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}'; then
+            docker_cmd=(sudo -n docker)
+          else
             echo '::error::Management runner cannot administer Docker without an interactive sudo password.'
             exit 1
           fi
           for container in ai-agent-api-1 portfolio-portfolio-1 mes-ticket-mes-1; do
-            sudo -n docker inspect --format '{{.Name}} image={{.Config.Image}} running={{.State.Running}}{{range .Mounts}} mount={{.Name}}:{{.Destination}}:rw={{.RW}}{{end}}' "$container"
+            "${docker_cmd[@]}" inspect --format '{{.Name}} image={{.Config.Image}} running={{.State.Running}}{{range .Mounts}} mount={{.Name}}:{{.Destination}}:rw={{.RW}}{{end}}' "$container"
           done
-          sudo -n docker exec mes-ticket-mes-1 node -e 'const fs=require("node:fs");const p=process.env.DRIVE_TOKEN_FILE;let c;try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}console.log(JSON.stringify({driveCredentialsReadable:!!c,offlineAccess:!!c?.refreshToken,oauthClientConfigured:!!((process.env.GOOGLE_DRIVE_CLIENT_ID||process.env.GOOGLE_CLIENT_ID)&&(process.env.GOOGLE_DRIVE_CLIENT_SECRET||process.env.GOOGLE_CLIENT_SECRET))}));if(!c?.refreshToken)process.exit(1)'
+          "${docker_cmd[@]}" exec mes-ticket-mes-1 node -e 'const fs=require("node:fs");const p=process.env.DRIVE_TOKEN_FILE;let c;try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}console.log(JSON.stringify({driveCredentialsReadable:!!c,offlineAccess:!!c?.refreshToken,oauthClientConfigured:!!((process.env.GOOGLE_DRIVE_CLIENT_ID||process.env.GOOGLE_CLIENT_ID)&&(process.env.GOOGLE_DRIVE_CLIENT_SECRET||process.env.GOOGLE_CLIENT_SECRET))}));if(!c?.refreshToken)process.exit(1)'
