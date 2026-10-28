@@ -17,8 +17,9 @@ jobs:
       - name: Verify application modes and runtime-role Drive commits
         run: |
           python3 - <<'PYTHON'
-          import json,pathlib,subprocess,urllib.request
+          import json,pathlib,subprocess,fcntl
           home=pathlib.Path.home()/'th-platform'
+          lock=open(home/'deploy.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
           apps=[
             ('ai-agent','ai-agent-api-1','server/storage-operator.js','https://ai.th.io.vn/api/ready'),
             ('portfolio','portfolio-portfolio-1','dist/server/storage-operator.cjs','https://th.io.vn/'),
@@ -38,8 +39,8 @@ jobs:
               if result.returncode:raise SystemExit('Runtime-role Drive verification failed for '+app+': '+result.stderr[-500:])
               proof=json.loads(result.stdout.strip())
               if proof.get('driveFirstVerified') is not True:raise SystemExit('Drive proof missing')
-              with urllib.request.urlopen(url,timeout=30) as response:
-                  if response.status!=200:raise SystemExit('Public route failed')
+              response=subprocess.run(['curl','--fail','--silent','--show-error','--retry','3','--max-time','30',url],capture_output=True)
+              if response.returncode:raise SystemExit('Public route failed for '+app+': '+response.stderr.decode()[-200:])
               print(json.dumps({'application':app,'publicHTTP':200,**proof}),flush=True)
           print(json.dumps({'driveRoot':json.loads((home/'state/drive-root.json').read_text())['folderId'],'allApplicationsVerified':True}))
           PYTHON
