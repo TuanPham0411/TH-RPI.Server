@@ -1,0 +1,49 @@
+name: Check TH-Server
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/server-check.yml
+permissions:
+  contents: read
+concurrency:
+  group: server-check
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Verify runner
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: test "$SELECTED_RUNNER" = th-server
+      - name: OS and resources
+        run: |
+          hostname
+          uname -m
+          cat /etc/os-release
+          free -h
+          df -h /
+          if command -v vcgencmd >/dev/null; then vcgencmd get_throttled; fi
+      - name: Service readiness
+        run: |
+          for unit in ssh nginx postgresql tailscaled cloudflared docker; do
+            printf '%s: ' "$unit"
+            systemctl is-active "$unit" || true
+          done
+      - name: Docker readiness
+        run: |
+          if command -v docker >/dev/null; then
+            docker --version
+            docker compose version || true
+            docker info --format 'Architecture={{.Architecture}} Server={{.ServerVersion}}' || true
+          else
+            echo 'Docker is not installed'
+          fi
+      - name: Application ports and public image access
+        run: |
+          ss -ltn '( sport = :80 or sport = :8080 or sport = :8081 or sport = :8082 )'
+          curl --silent --show-error --output /dev/null --write-out 'GHCR HTTP %{http_code}\n' --max-time 20 https://ghcr.io/v2/
