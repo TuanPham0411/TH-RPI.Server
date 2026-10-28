@@ -21,14 +21,15 @@ jobs:
           id -un
           free -m
           docker_cmd=(docker)
-          if docker info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}' 2>/dev/null; then
+          if docker ps --format '{{.ID}}' >/dev/null 2>&1; then
             :
-          elif sudo -n docker info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}'; then
+          elif sudo -n docker ps --format '{{.ID}}' >/dev/null; then
             docker_cmd=(sudo -n docker)
           else
             echo '::error::Management runner cannot administer Docker without an interactive sudo password.'
             exit 1
           fi
+          "${docker_cmd[@]}" info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}'
           for container in ai-agent-api-1 portfolio-portfolio-1 mes-ticket-mes-1; do
             "${docker_cmd[@]}" inspect --format '{{.Name}} image={{.Config.Image}} running={{.State.Running}}{{range .Mounts}} mount={{.Name}}:{{.Destination}}:rw={{.RW}}{{end}}' "$container"
           done
