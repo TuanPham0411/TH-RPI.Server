@@ -1,0 +1,6 @@
+node_modules/
+work/
+config/
+state/
+run/
+*.env
