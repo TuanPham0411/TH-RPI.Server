@@ -54,3 +54,10 @@ not treat expiring Google image URLs as a durable backup.
 PostgreSQL capture/rollback/restore integration test. Tests use isolated databases
 and an in-memory Drive transport. Live Drive writes are verified during rollout;
 unit tests alone do not establish successful production deployment.
+
+AI owner sessions are managed centrally over the private storage socket. Google
+sign-in uses PKCE and a browser-bound state, verifies the configured Drive owner's
+email, and persists only hashed session identifiers in encrypted server ledger
+records. Revocation is durable before logout is acknowledged. Configure the OAuth
+redirect `https://ai.th.io.vn/api/oauth/callback`; no Drive or Google token reaches
+the browser. AI prompts remain local until the owner explicitly saves a draft.

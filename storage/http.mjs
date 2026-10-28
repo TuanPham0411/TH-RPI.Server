@@ -3,18 +3,28 @@ import {timingSafeEqual} from 'node:crypto';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-export function storageServer({coordinator,tokens,photos,status}){
+export function storageServer({coordinator,tokens,photos,ownerAuth,status}){
  return http.createServer(async(req,res)=>{
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
   const app=req.headers['x-th-application'];
   const respond=(status,value)=>{res.statusCode=status;res.end(JSON.stringify(value));};
   if(!Object.hasOwn(tokens,app||'')||!equal(req.headers.authorization,`Bearer ${tokens[app]}`))return respond(403,{error:'Storage authentication required'});
   const photosOperation=req.url.startsWith('/v1/photos/');
-  if(req.method!=='POST'||!photosOperation&&!['/v1/check','/v1/commit','/v1/history','/v1/event','/v1/file','/v1/resolve-file','/v1/status'].includes(req.url))return respond(404,{error:'Unknown storage operation'});
+  const authOperation=req.url.startsWith('/v1/auth/');
+  if(req.method!=='POST'||!photosOperation&&!authOperation&&!['/v1/check','/v1/commit','/v1/history','/v1/event','/v1/file','/v1/resolve-file','/v1/status'].includes(req.url))return respond(404,{error:'Unknown storage operation'});
+  if(authOperation&&(app!=='ai-agent'||!ownerAuth))return respond(403,{error:'Owner authentication unavailable for this application'});
   if(photosOperation&&(app!=='portfolio'||!photos))return respond(403,{error:'Google Photos belongs to Portfolio only'});
   try{
    const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16*1024*1024){respond(413,{error:'Storage batch too large'});return;}chunks.push(chunk);}
    const body=JSON.parse(Buffer.concat(chunks));
+   if(authOperation){
+    const action=req.url.slice('/v1/auth/'.length);
+    if(action==='start')return respond(200,ownerAuth.start(body.binding));
+    if(action==='callback')return respond(200,await ownerAuth.callback(body));
+    if(action==='session')return respond(200,ownerAuth.session(body.session));
+    if(action==='logout')return respond(200,await ownerAuth.logout(body.session));
+    return respond(404,{error:'Unknown authentication operation'});
+   }
    if(req.url==='/v1/status')return respond(200,status?await status(app):{ready:true});
    if(photosOperation){
     const action=req.url.slice('/v1/photos/'.length);
