@@ -1,0 +1,28 @@
+name: Finalize console recovery operator
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/finalize-console.yml]
+permissions: {contents: read}
+jobs:
+  finalize:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - name: Install current recovery operator and verify console
+        run: |
+          test "${{ runner.name }}" = th-server
+          systemctl is-enabled th-server-console.service
+          systemctl is-active th-server-console.service
+          install -m 700 deploy/snapshot.py ~/th-platform/operator/snapshot.py
+          python3 - <<'PY'
+          import json,pathlib
+          state=pathlib.Path.home()/'th-platform/state'
+          console=json.loads((state/'console-deployment.json').read_text())
+          ticket=json.loads((state/'ticket-deployment.json').read_text())
+          assert console['ready'] and ticket['imageTag']=='1565d122dac4a61b86359ad8f850606e533dd11a' and ticket['ready']
+          print(json.dumps({'consoleReady':True,'latestTicketLanguageRelease':True,'persistentRecoveryOperatorUpdated':True}))
+          PY
+          python3 ~/th-platform/operator/snapshot.py
