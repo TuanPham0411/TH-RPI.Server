@@ -16,7 +16,7 @@ jobs:
           print(json.dumps({'files':[p.name for p in stage.iterdir()]}))
           for path in stage.glob('command-error-*.log'):
               content=path.read_text(errors='replace')
-              lines=[line for line in content.splitlines() if 'ERROR:' in line or 'FATAL:' in line or 'Error' in line]
+              lines=[line for line in content.splitlines() if 'ERROR:' in line or 'FATAL:' in line or 'Error' in line or 'parameter' in line or 'not set' in line or 'denied' in line]
               for line in lines[:3]:print(path.name+': '+re.sub(r"'[^']*'|\"[^\"]*\"", '[redacted]', line)[:300])
           PY
           docker ps -a --format '{{.Names}} {{.Status}}'
