@@ -67,6 +67,7 @@ def main():
  lines+=['IMAGE_TAG='+APP_TAG,'TH_STORAGE_MODE=drive-first','TH_STORAGE_SOCKET=/run/th-storage/storage.sock','TH_STORAGE_TOKEN='+config['tokens'][old],'TH_STORAGE_RUN_DIR='+str(home/'run')]
  (target/'.env').write_text('\n'.join(lines)+'\n');(target/'.env').chmod(0o600)
  for name in ['compose.yaml','storage.compose.yaml','database-init.sh']:fetch('TH-Ticket',APP_TAG,name,target/name)
+ (target/'database-init.sh').chmod(0o644)
  base=compose(target,'ticket')
  run(['docker','image','inspect',PLATFORM_IMAGE]);run(['docker','pull',APP_IMAGE])
  old_volume=json.loads(run(['docker','inspect',old_container]))[0]['Mounts']
@@ -78,9 +79,15 @@ def main():
   if state['State'].get('Health',{}).get('Status')=='healthy':break
   time.sleep(2)
  else:raise RuntimeError('Target database is not ready')
+ if sql('ticket-database-1','postgres',"SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='th_api')").strip()!='t':
+  run(['docker','exec','ticket-database-1','sh','/docker-entrypoint-initdb.d/ticket-role.sh'])
+ if (stage/'drive-changing.json').exists():raise RuntimeError('Drive transition checkpoint already exists; resume that phase instead of resetting data')
+ if (home/'state/ticket-deployment.json').exists():raise RuntimeError('An active Ticket deployment already exists; target reset is forbidden')
+ run(['docker','exec','ticket-database-1','dropdb','-U','postgres','--if-exists','ticket'])
+ run(['docker','exec','ticket-database-1','createdb','-U','postgres','ticket'])
  maintenance=home/'run/maintenance';maintenance.write_text('Ticket namespace transition in progress\n')
  run(['docker','stop','-t','360',old_container])
- run(['docker','run','--rm','--user','0','--entrypoint','sh','-v',old_volume+':/from:ro','-v','ticket_media:/to',APP_IMAGE,'-c','test -z "$(ls -A /to)" && cp -a /from/. /to/'])
+ run(['docker','run','--rm','--user','0','--entrypoint','sh','-v',old_volume+':/from:ro','-v','ticket_media:/to',APP_IMAGE,'-c','if test -z "$(ls -A /to)"; then cp -a /from/. /to/; fi'])
  verify_media="const fs=require('fs'),p=require('path'),c=require('crypto');function inventory(root,dir=''){const out=[];for(const e of fs.readdirSync(p.join(root,dir),{withFileTypes:true})){const name=p.join(dir,e.name);if(e.isSymbolicLink())throw Error('Unexpected media symlink');if(e.isDirectory())out.push(...inventory(root,name));else if(e.isFile()){const h=c.createHash('sha256'),fd=fs.openSync(p.join(root,name),'r'),b=Buffer.alloc(65536);let n;try{while((n=fs.readSync(fd,b,0,b.length,null)))h.update(b.subarray(0,n));}finally{fs.closeSync(fd);}out.push([name,h.digest('hex')]);}}return out.sort((a,b)=>a[0].localeCompare(b[0]));}if(JSON.stringify(inventory('/from'))!==JSON.stringify(inventory('/to')))throw Error('Media copy differs');console.log('Media byte checksums verified');"
  announce(run(['docker','run','--rm','--user','0','--entrypoint','node','-v',old_volume+':/from:ro','-v','ticket_media:/to:ro',APP_IMAGE,'-e',verify_media]).decode().strip())
  announce('Source writes stopped; exporting verified database rows and Drive history.')
