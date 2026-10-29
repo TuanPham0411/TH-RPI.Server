@@ -88,6 +88,8 @@ jobs:
                   '--mount','type=bind,src=/opt,dst=/host/opt',
                   '--mount','type=bind,src=/etc/systemd/system,dst=/host/etc/systemd/system',
                   '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
+                  '--tmpfs','/host/tmp:rw,nosuid,nodev,noexec,size=16m',
+                  '--tmpfs','/host/var/tmp:rw,nosuid,nodev,noexec,size=16m',
                   sys.argv[1],'python3','/app/console/install.py',sys.argv[2]]
               subprocess.run(command,check=True)
               state={'application':'hdmi-console','imageTag':sys.argv[2],'ready':True,'terminal':'tty1'}

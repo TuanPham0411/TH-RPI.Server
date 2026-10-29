@@ -209,5 +209,6 @@ def main():
         else:usb_action(args.mount or args.unmount,bool(args.unmount))
         return
     if not os.isatty(0):raise SystemExit('Connect a physical terminal or use --snapshot')
+    if os.environ.get('TERM')=='linux':os.write(1,b'\x1b[9;0]')
     curses.wrapper(console)
 if __name__=='__main__':main()
