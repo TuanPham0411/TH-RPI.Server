@@ -99,11 +99,18 @@ jobs:
       - name: Verify display service and application health
         run: |
           systemctl is-active th-server-console.service
-          test "$(systemctl show th-server-console.service --property=NRestarts --value)" = 0
+          before="$(systemctl show th-server-console.service --property=NRestarts --value)"
+          sleep 10
+          systemctl is-active th-server-console.service
+          test "$(systemctl show th-server-console.service --property=NRestarts --value)" = "$before"
+          test -x /usr/bin/nmtui
           for pair in '8080 th.io.vn health' '8081 ai.th.io.vn ready' '8082 ticket.th.io.vn health'; do
             read -r port host endpoint <<< "$pair"
             curl --fail --silent --show-error --max-time 15 -H "Host: $host" "http://127.0.0.1:$port/api/$endpoint"
           done
           python3 /opt/th-server-console/current/console.py --snapshot | python3 -c 'import json,sys;s=json.load(sys.stdin);print(json.dumps({"host":s["hostname"],"apps":s["apps"],"runnerCount":len(s["runners"]),"temperature":s["temperature"]}))'
+      - name: Verify actual tty1 screen
+        run: |
+          docker run --rm --network none --user 0 --cap-drop ALL --cap-add DAC_OVERRIDE --device /dev/vcs1:/dev/vcs1:r ghcr.io/tuanpham0411/th-rpi-console:${{ github.sha }} python3 -c 'import json;screen=open("/dev/vcs1","rb").read().decode("ascii","replace");assert "TH-SERVER" in screen and "Overview" in screen;print(json.dumps({"physicalTty1Screen":True,"consoleHeaderVerified":True}))'
       - name: Snapshot console configuration to Drive
         run: python3 deploy/snapshot.py

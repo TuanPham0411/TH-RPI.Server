@@ -82,3 +82,8 @@ schema SQL and migration catalogs are stored inside encrypted JSON on Drive. The
 nightly recovery workflow takes a fresh snapshot first and uses those remote
 definitions, rather than relying on a surviving production schema. This schedule
 protects host configuration separately from synchronous application saves.
+
+
+## HDMI console
+
+TH-Server includes a local operations console on tty1: resources, application health, network/Tailscale status, GitHub runners and USB partitions. Network and USB administration require the thadmin sudo password at the physical keyboard. See [console instructions](console/README.md). Immutable ARM64/AMD64 Docker distribution: `ghcr.io/tuanpham0411/th-rpi-console:<commit>`; the display itself runs natively through systemd to access the Pi terminal.
