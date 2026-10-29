@@ -1,0 +1,17 @@
+name: Inspect physical console
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/inspect-hdmi.yml]
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect host display service
+        run: |
+          test "${{ runner.name }}" = th-server
+          systemctl show th-server-console.service --property=ActiveState,SubState,NRestarts,ExecMainStatus
+          command -v nmtui || true
+          docker run --rm --network none --pid host --user 0 --cap-drop ALL --cap-add SYS_CHROOT --cap-add DAC_OVERRIDE --mount type=bind,src=/,dst=/host,readonly ghcr.io/tuanpham0411/th-rpi-console:d047289087e699b6ff506adf9f84ecafc7bab8bc chroot /host journalctl -u th-server-console.service -n 45 --no-pager
