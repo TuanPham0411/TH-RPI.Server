@@ -32,6 +32,7 @@ for name in ['compose.yaml','storage.compose.yaml','database-init.sh']:
  source=args.source/name
  if not source.is_file() or source.is_symlink(): raise SystemExit('Trusted release file missing: '+name)
  shutil.copyfile(source,release/name)
+ if name=='database-init.sh': (release/name).chmod(0o644)
 (release/'image.env').write_text('IMAGE_TAG='+args.image_tag+'\n')
 # Service env_file paths resolve against the release, independently of CLI --env-file.
 environment=release/'.env'

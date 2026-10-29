@@ -34,6 +34,9 @@ def main():
   raise RuntimeError('Ticket already configured; inspect the existing transition checkpoint before retrying')
  if len(old)!=1:raise RuntimeError('Ambiguous source application')
  old=old[0];text,change=renamer(old)
+ global_maintenance=home/'run/maintenance'
+ if global_maintenance.exists() and global_maintenance.read_text().startswith('Ticket namespace transition'):
+  global_maintenance.unlink()
  old_state=json.loads((home/'state'/(old+'-deployment.json')).read_text())
  old_container=old+'-'+old.split('-')[0]+'-1';old_db=old+'-database-1';old_database=old.replace('-','_')
  source=pathlib.Path(__file__).parent
@@ -80,12 +83,13 @@ def main():
   time.sleep(2)
  else:raise RuntimeError('Target database is not ready')
  if sql('ticket-database-1','postgres',"SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='th_api')").strip()!='t':
-  run(['docker','exec','ticket-database-1','sh','/docker-entrypoint-initdb.d/ticket-role.sh'])
+  run(['docker','exec','-e','POSTGRES_USER=postgres','-e','POSTGRES_DB=ticket','ticket-database-1','sh','/docker-entrypoint-initdb.d/ticket-role.sh'])
  if (stage/'drive-changing.json').exists():raise RuntimeError('Drive transition checkpoint already exists; resume that phase instead of resetting data')
  if (home/'state/ticket-deployment.json').exists():raise RuntimeError('An active Ticket deployment already exists; target reset is forbidden')
  run(['docker','exec','ticket-database-1','dropdb','-U','postgres','--if-exists','ticket'])
  run(['docker','exec','ticket-database-1','createdb','-U','postgres','ticket'])
- maintenance=home/'run/maintenance';maintenance.write_text('Ticket namespace transition in progress\n')
+ maintenance=home/'run'/('maintenance-'+old);maintenance.write_text('Ticket namespace transition in progress\n')
+ target_maintenance=home/'run/maintenance-ticket';target_maintenance.write_text('Ticket namespace transition in progress\n')
  run(['docker','stop','-t','360',old_container])
  run(['docker','run','--rm','--user','0','--entrypoint','sh','-v',old_volume+':/from:ro','-v','ticket_media:/to',APP_IMAGE,'-c','if test -z "$(ls -A /to)"; then cp -a /from/. /to/; fi'])
  verify_media="const fs=require('fs'),p=require('path'),c=require('crypto');function inventory(root,dir=''){const out=[];for(const e of fs.readdirSync(p.join(root,dir),{withFileTypes:true})){const name=p.join(dir,e.name);if(e.isSymbolicLink())throw Error('Unexpected media symlink');if(e.isDirectory())out.push(...inventory(root,name));else if(e.isFile()){const h=c.createHash('sha256'),fd=fs.openSync(p.join(root,name),'r'),b=Buffer.alloc(65536);let n;try{while((n=fs.readSync(fd,b,0,b.length,null)))h.update(b.subarray(0,n));}finally{fs.closeSync(fd);}out.push([name,h.digest('hex')]);}}return out.sort((a,b)=>a[0].localeCompare(b[0]));}if(JSON.stringify(inventory('/from'))!==JSON.stringify(inventory('/to')))throw Error('Media copy differs');console.log('Media byte checksums verified');"
@@ -131,6 +135,7 @@ def main():
  verified=json.loads((stage/'drive-verified.json').read_text())
  if not verified.get('verified'):raise RuntimeError('Drive history verification was not acknowledged')
  atomic(stage/'runtime-before.json',config)
+ global_maintenance.write_text('Ticket namespace transition in progress\n')
  config['tokens']['ticket']=config['tokens'].pop(old);atomic(config_path,config)
  platform_release=home/'releases'/PLATFORM_TAG;platform_release.mkdir(parents=True,exist_ok=True)
  fetch('TH-RPI.Server',PLATFORM_TAG,'compose.yaml',platform_release/'compose.yaml')
@@ -162,6 +167,7 @@ def main():
  atomic(home/'state/ticket-deployment.json',{'application':'ticket','imageTag':APP_TAG,'release':str(release),'backup':str(stage),'driveFirst':True,'ready':True})
  atomic(home/'state/deployment.json',{'imageTag':PLATFORM_TAG,'release':str(platform_release),'ready':True})
  maintenance.unlink(missing_ok=True)
+ target_maintenance.unlink(missing_ok=True);global_maintenance.unlink(missing_ok=True)
  atomic(stage/'completed.json',{'complete':True,'driveFolderId':verified['folderId'],'rowsVerified':True,'operations':len(converted),'oldApplication':old,'oldVolume':old_volume})
  announce('Ticket namespace transition completed; database rows and Drive history verified.')
 
