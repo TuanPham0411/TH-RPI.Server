@@ -13,7 +13,8 @@ def request(port,path,method='GET',data=None,cookie=None):
  headers={'Content-Type':'application/json','Host':'ai.th.io.vn','Origin':'https://ai.th.io.vn'}
  if cookie:headers['Cookie']=cookie
  req=urllib.request.Request(f'http://127.0.0.1:{port}'+path,data=json.dumps(data).encode() if data is not None else None,headers=headers,method=method)
- with urllib.request.urlopen(req,timeout=120) as res:
+ print(json.dumps({'phase':'n8n-api','method':method,'path':path}),flush=True)
+ with urllib.request.urlopen(req,timeout=300) as res:
   body=res.read();value=json.loads(body) if body else {};return value,res.headers
 
 def main():

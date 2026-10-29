@@ -1,4 +1,5 @@
 name: Resume tested n8n installation
+# Allow slow first-owner setup on the Pi without changing an existing owner.
 on:
   push:
     branches: [main]
