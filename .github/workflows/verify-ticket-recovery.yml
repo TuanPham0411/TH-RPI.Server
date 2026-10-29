@@ -1,0 +1,46 @@
+name: Verify Ticket recovery
+on:
+  push:
+    paths: ['.github/workflows/verify-ticket-recovery.yml']
+permissions: {contents: read}
+jobs:
+  verify:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 60
+    steps:
+      - name: Verify public routes and cold restore Ticket from Drive
+        run: |
+          set -eu
+          umask 077
+          OPERATOR="$HOME/th-platform/operator"
+          mkdir -p "$OPERATOR"
+          for file in snapshot.py recovery-drill.py ticket-cleanup.py; do
+            curl -fsSL --retry 3 https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/226e682c01bf6abcff312513a9931b7feb932408/deploy/$file -o "$OPERATOR/$file"
+          done
+          test -f "$HOME/th-platform/state/ticket-transition/completed.json"
+          printf '%s\n' 'Ticket recovery verification in progress' > "$HOME/th-platform/run/maintenance-ticket"
+          trap 'rm -f "$HOME/th-platform/run/maintenance-ticket"' EXIT
+          python3 "$OPERATOR/snapshot.py"
+          python3 "$OPERATOR/recovery-drill.py" --application ticket
+          python3 - <<'PY'
+          import pathlib,json,urllib.request,re,urllib.parse
+          home=pathlib.Path.home()/'th-platform'
+          state=json.loads((home/'state/ticket-deployment.json').read_text())
+          result=json.loads((home/'state/ticket-recovery-verification.json').read_text())
+          assert result['release']==state['imageTag']
+          assert all(result.get(k) for k in ['restoredFromDrive','foreignKeysVerified','mediaChecksumsVerified','productionUnchanged','exactRowsCompared'])
+          for url in ['https://ticket.th.io.vn/api/health','https://th.io.vn/api/health','https://ai.th.io.vn/api/ready']:
+              with urllib.request.urlopen(url,timeout=30) as response:assert response.status==200
+          with urllib.request.urlopen('https://ticket.th.io.vn/',timeout=30) as response:html=response.read().decode()
+          assert '<title>TH.Ticket</title>' in html
+          old=json.loads((home/'state/ticket-transition/completed.json').read_text())['oldApplication'].split('-')[0]
+          assert not re.search(r'(?<![A-Za-z0-9])'+re.escape(old)+r'(?![A-Za-z0-9])',html,re.I)
+          for asset in re.findall(r'src="([^\"]+\.js)"',html):
+              url=urllib.parse.urljoin('https://ticket.th.io.vn/',asset)
+              with urllib.request.urlopen(url,timeout=30) as response:script=response.read().decode()
+              assert '/api/'+old+'/' not in script
+          proof={**result,'imageTag':state['imageTag'],'publicRoutesVerified':True,'ticketBrandingVerified':True}
+          (home/'state/ticket-recovery-verified.json').write_text(json.dumps(proof))
+          print(json.dumps(proof))
+          PY
+          python3 "$OPERATOR/ticket-cleanup.py"
