@@ -43,15 +43,20 @@ def main():
  if not sql("SELECT 1 FROM pg_database WHERE datname='th_n8n'"):
   sql('CREATE DATABASE th_n8n OWNER th_n8n;')
  command=['docker','compose','-p','th-n8n','--env-file',str(envpath),'-f',str(folder/'compose.yaml')]
- run(command+['pull']);run(command+['up','-d'])
+ for image in [values['N8N_IMAGE'],values['GATEWAY_IMAGE']]:
+  if subprocess.run(['docker','image','inspect',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:
+   print(json.dumps({'phase':'pulling','image':image}),flush=True);run(['docker','pull',image])
+ print(json.dumps({'phase':'starting-private-staging'}),flush=True)
+ run(command+['up','-d'])
  ready=False
- for attempt in range(180):
+ for attempt in range(360):
   try:
    value,_=request(8083,'/api/ready')
    if value.get('status')=='ready':ready=True;break
   except Exception:pass
   time.sleep(5)
  if not ready:raise RuntimeError('Staged n8n is not ready; existing AI site was retained')
+ print(json.dumps({'phase':'provisioning-owner-and-workflow'}),flush=True)
  ownerfile=HOME/'config/n8n-owner-login.json'
  if not ownerfile.exists():
   owner={'email':'eric.scorp93@gmail.com','password':'TH1!'+secrets.token_urlsafe(24),'firstName':'TH','lastName':'Owner'}
@@ -81,6 +86,7 @@ def main():
  (HOME/'state/n8n-deployment.json').write_text(json.dumps(state))
  # Initial encrypted Drive backup and isolated restore verification precede cutover.
  sys.path.insert(0,str(HERE));from backup import backup
+ print(json.dumps({'phase':'drive-backup-and-isolated-restore'}),flush=True)
  backup(verify=True,locked=True)
  was_running={name:run(['docker','inspect',name,'--format','{{.State.Running}}']).decode().strip()=='true' for name in ['ai-agent-api-1','ai-agent-web-1']}
  try:

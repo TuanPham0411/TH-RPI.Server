@@ -1,0 +1,36 @@
+name: Resume tested n8n installation
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/resume-n8n.yml]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: n8n-server-install, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 50
+    steps:
+      - name: Resume the tested immutable release without extra Node actions
+        env:
+          PLATFORM_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "${{ runner.name }}" = th-server
+          release=b1ed2b634e4c5954f43d6d6597e16fbe5b923d09
+          work_dir="$(mktemp -d "$RUNNER_TEMP/th-n8n-resume.XXXXXX")"
+          trap 'rm -rf "$work_dir"' EXIT
+          mkdir "$work_dir/app"
+          for file in deploy.py host.py backup.py drive.mjs codec.mjs; do
+            curl --fail --silent --show-error --location --retry 3 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/$PLATFORM_SHA/n8n/$file" -o "$work_dir/$file"
+          done
+          for file in compose.yaml workflow.json; do
+            curl --fail --silent --show-error --location --retry 3 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-AI.Agent/$release/n8n/$file" -o "$work_dir/app/$file"
+          done
+          python3 -u "$work_dir/deploy.py" --release "$release" --platform-release "$PLATFORM_SHA" --source "$work_dir/app"
+      - name: Verify all public applications
+        run: |
+          curl --fail --silent --show-error --max-time 45 https://ai.th.io.vn/api/ready
+          curl --fail --silent --show-error --max-time 45 https://ai.th.io.vn/ | python3 -c 'import sys;assert "n8n" in sys.stdin.read().lower()'
+          curl --fail --silent --show-error --max-time 30 https://th.io.vn/api/health
+          curl --fail --silent --show-error --max-time 30 https://ticket.th.io.vn/api/health
