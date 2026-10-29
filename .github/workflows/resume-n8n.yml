@@ -1,5 +1,5 @@
 name: Resume tested n8n installation
-# Allow slow first-owner setup on the Pi without changing an existing owner.
+# Apply the validated Pi-native probe and grant TTL after the first verified cutover.
 on:
   push:
     branches: [main]
@@ -35,3 +35,23 @@ jobs:
           curl --fail --silent --show-error --max-time 45 https://ai.th.io.vn/ | python3 -c 'import sys;assert "n8n" in sys.stdin.read().lower()'
           curl --fail --silent --show-error --max-time 30 https://th.io.vn/api/health
           curl --fail --silent --show-error --max-time 30 https://ticket.th.io.vn/api/health
+      - name: Verify private memory, task runner, backup timer and native probe
+        run: |
+          docker exec th-n8n-n8n-1 /bin/busybox wget -q -O /dev/null http://127.0.0.1:5678/healthz/readiness
+          systemctl is-active th-n8n-backup.timer
+          systemctl show th-server-console.service --property=ActiveState,NRestarts
+          docker ps --format '{{.Names}} {{.Status}}'
+          docker logs --tail 60 th-n8n-n8n-1 2>&1 | grep -E 'Registered runner|connection attempt failed|Version:|Editor is now' || true
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          home=pathlib.Path.home()/'th-platform'
+          state=json.loads((home/'state/n8n-deployment.json').read_text())
+          backup=json.loads((home/'state/n8n-backup.json').read_text())
+          assert state['ready'] and backup['verified'] and backup['restoreVerified']
+          print(json.dumps({'ready':state['ready'],'version':state['version'],'workflowId':state['workflowId'],'driveVerified':backup['verified'],'restoreVerified':backup['restoreVerified']}))
+          result=subprocess.check_output(['docker','inspect','th-n8n-n8n-1','--format','{{json .Config}}'],text=True)
+          config=json.loads(result)
+          selected=[item for item in config['Env'] if item.startswith(('N8N_RUNNERS_GRANT_TOKEN_TTL=','N8N_RUNNERS_TASK_TIMEOUT='))]
+          print('nonsecretRunnerLimits',selected)
+          print('healthcheck',config['Healthcheck']['Test'])
+          PY
