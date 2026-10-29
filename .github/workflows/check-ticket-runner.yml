@@ -14,6 +14,6 @@ jobs:
           python3 - <<'PY'
           import pathlib,json
           for path in (pathlib.Path.home()/'actions-runners').glob('*/.runner'):
-              data=json.loads(path.read_text())
+              data=json.loads(path.read_text(encoding='utf-8-sig'))
               print(json.dumps({'directory':str(path.parent),'name':data.get('agentName'),'repository':data.get('gitHubUrl') or data.get('gitHubUrlV2')}))
           PY
