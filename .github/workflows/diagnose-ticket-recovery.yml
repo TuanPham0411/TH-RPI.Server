@@ -6,19 +6,14 @@ permissions: {contents: read}
 jobs:
   diagnose:
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 5
+    timeout-minutes: 45
     steps:
-      - name: Validate recovery configuration without reading user data
+      - name: Restore an isolated Ticket database with redacted diagnostics
         run: |
-          python3 - <<'PY'
-          import pathlib,json,subprocess,re
-          home=pathlib.Path.home()/'th-platform'
-          state=json.loads((home/'state/ticket-deployment.json').read_text());release=pathlib.Path(state['release'])
-          base=['docker','compose','-p','ticket','--env-file',str(pathlib.Path.home()/'apps/ticket/.env'),'--env-file',str(home/'apps/ticket.env'),'--env-file',str(release/'image.env'),'-f',str(release/'compose.yaml'),'-f',str(release/'storage.compose.yaml')]
-          for flags in [['--quiet'],['--services'],['--images']]:
-              result=subprocess.run(base+['config']+flags,capture_output=True,text=True)
-              safe=re.sub(r"'[^']*'|\"[^\"]*\"", '[redacted]', result.stderr)
-              print(json.dumps({'check':flags,'code':result.returncode,'output':result.stdout if flags!=['--quiet'] and result.returncode==0 else '', 'error':safe[:800]}))
-          result=subprocess.run(['docker','exec','ticket-database-1','sh','-c','PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U postgres -d ticket -At -c "select 1"'],capture_output=True,text=True)
-          print(json.dumps({'databasePasswordVerified':result.returncode==0}))
-          PY
+          set -eu
+          umask 077
+          SOURCE="$(mktemp)"
+          trap 'rm -f "$SOURCE" "$HOME/th-platform/run/maintenance-ticket"' EXIT
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/81688886e5e513f1dcb0311315cab23ecda2ef6d/deploy/ticket-debug-recovery.py -o "$SOURCE"
+          printf '%s\n' 'Ticket recovery verification in progress' > "$HOME/th-platform/run/maintenance-ticket"
+          python3 "$SOURCE" --application ticket
