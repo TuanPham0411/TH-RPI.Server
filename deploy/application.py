@@ -7,7 +7,7 @@ import argparse, datetime, fcntl, json, os, pathlib, shutil, subprocess, time
 APPS = {
  'ai-agent': {'service':'api','web':['web'],'database':'db','name':'th_ai','port':8081,'domain':'ai.th.io.vn','operator':'server/storage-operator.js'},
  'portfolio': {'service':'portfolio','web':[],'database':'database','name':'th_portfolio','port':8080,'domain':'th.io.vn','operator':'dist/server/storage-operator.cjs'},
- 'mes-ticket': {'service':'mes','web':[],'database':'database','name':'mes_ticket','port':8082,'domain':'ticket.th.io.vn','operator':'dist/server/storage-operator.cjs'},
+ 'ticket': {'service':'ticket','web':[],'database':'database','name':'ticket','port':8082,'domain':'ticket.th.io.vn','operator':'dist/server/storage-operator.cjs'},
 }
 
 def run(command, **kwargs): return subprocess.run(command,check=True,**kwargs)
@@ -32,6 +32,7 @@ for name in ['compose.yaml','storage.compose.yaml','database-init.sh']:
  source=args.source/name
  if not source.is_file() or source.is_symlink(): raise SystemExit('Trusted release file missing: '+name)
  shutil.copyfile(source,release/name)
+ if name=='database-init.sh': (release/name).chmod(0o644)
 (release/'image.env').write_text('IMAGE_TAG='+args.image_tag+'\n')
 # Service env_file paths resolve against the release, independently of CLI --env-file.
 environment=release/'.env'

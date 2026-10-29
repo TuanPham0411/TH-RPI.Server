@@ -30,7 +30,7 @@ jobs:
             exit 1
           fi
           "${docker_cmd[@]}" info --format 'Docker={{.ServerVersion}} Architecture={{.Architecture}}'
-          for container in ai-agent-api-1 portfolio-portfolio-1 mes-ticket-mes-1; do
+          for container in ai-agent-api-1 portfolio-portfolio-1 ticket-ticket-1; do
             "${docker_cmd[@]}" inspect --format '{{.Name}} image={{.Config.Image}} running={{.State.Running}}{{range .Mounts}} mount={{.Name}}:{{.Destination}}:rw={{.RW}}{{end}}' "$container"
           done
-          "${docker_cmd[@]}" exec mes-ticket-mes-1 node -e 'const fs=require("node:fs");const p=process.env.DRIVE_TOKEN_FILE;let c;try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}console.log(JSON.stringify({driveCredentialsReadable:!!c,offlineAccess:!!c?.refreshToken,oauthClientConfigured:!!((process.env.GOOGLE_DRIVE_CLIENT_ID||process.env.GOOGLE_CLIENT_ID)&&(process.env.GOOGLE_DRIVE_CLIENT_SECRET||process.env.GOOGLE_CLIENT_SECRET))}));if(!c?.refreshToken)process.exit(1)'
+          "${docker_cmd[@]}" exec ticket-ticket-1 node -e 'const fs=require("node:fs");const p=process.env.DRIVE_TOKEN_FILE;let c;try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}console.log(JSON.stringify({driveCredentialsReadable:!!c,offlineAccess:!!c?.refreshToken,oauthClientConfigured:!!((process.env.GOOGLE_DRIVE_CLIENT_ID||process.env.GOOGLE_CLIENT_ID)&&(process.env.GOOGLE_DRIVE_CLIENT_SECRET||process.env.GOOGLE_CLIENT_SECRET))}));if(!c?.refreshToken)process.exit(1)'

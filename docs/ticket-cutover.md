@@ -1,15 +1,15 @@
-# TH.Ticket cutover
+# TH.Ticket
 
-The application moves to https://ticket.th.io.vn and repository TuanPham0411/TH-Ticket.
-The deployment uses the th-ticket runner with its th-ticket label.
+The application is served at https://ticket.th.io.vn from TuanPham0411/TH-Ticket with runner th-ticket.
 
-Before merging the application change:
-1. Rename TH-MES.Ticket to TH-Ticket in GitHub Settings > General. Preserve the existing repository.
-2. Add Cloudflare Tunnel published hostname ticket.th.io.vn -> http://localhost:80.
-3. Add Google OAuth redirect URIs https://ticket.th.io.vn/api/oauth/callback and https://ticket.th.io.vn/api/mes/drive/callback. Keep old entries during migration.
-4. Run deploy/ticket-cutover.py on the Pi with its adjacent ticket-nginx.conf; review its printed commands, then run them with sudo (or use --apply where passwordless sudo is configured).
-5. Reconfigure the repository runner as th-ticket using GitHub's fresh removal and registration tokens. Do not send tokens in chat. Stop/uninstall the old service before re-registering in its existing runner directory; reinstall/start afterward.
+Active resources use ticket consistently:
+- Server application: ~/apps/ticket
+- Compose project and media volume: ticket, ticket_media
+- PostgreSQL database and private schema: ticket, ticket_private
+- Application routes: /api/ticket
+- Runtime database password variable: TICKET_DB_PASSWORD
+- Google Drive folder: th-data/ticket
 
-The original Compose project mes-ticket, PostgreSQL database/volumes, API paths and Drive history IDs remain stable. This prevents a new empty database or broken storage chain. Product labels use TH.Ticket.
+Data transition preserves account password hashes, native Drive file IDs, attachment bytes and ordered authenticated history. A cold recovery and exact row comparison are required before removing retired resources.
 
-Merge and deploy the application only after the new hostname route is ready. Verify HTTPS, owner login, a ticket save and attachment access. Redirect the old hostname only after verification.
+Run deploy/ticket-cleanup.py to review the cleanup plan, then use --apply after recovery verification. Root-owned Nginx changes require the administrator's sudo authentication. Remove retired Cloudflare routes, DNS entries and OAuth redirect URIs after checking Ticket login and attachments.

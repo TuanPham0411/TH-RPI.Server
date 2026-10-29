@@ -20,7 +20,7 @@ Drive operation. A Drive outage intentionally prevents successful saves.
 
 The broker has no public TCP listener and no Docker socket. Each application has
 its own bearer token over a Unix socket. Source media volumes are read-only to the
-broker. Runtime configuration and existing MES authorization are copied into the
+broker. Runtime configuration and existing TICKET authorization are copied into the
 private `~/th-platform/config/` directory by the management deployment job.
 
 ## Recovery and sensitive data

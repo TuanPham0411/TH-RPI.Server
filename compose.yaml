@@ -14,7 +14,7 @@ services:
       - ${TH_PLATFORM_HOME:?Platform home required}/state:/state
       - ai:/source/ai:ro
       - portfolio:/source/portfolio:ro
-      - mes:/source/mes:ro
+      - ticket:/source/ticket:ro
 volumes:
   ai:
     external: true
@@ -22,6 +22,6 @@ volumes:
   portfolio:
     external: true
     name: portfolio_media
-  mes:
+  ticket:
     external: true
-    name: mes-ticket_media
+    name: ticket_media

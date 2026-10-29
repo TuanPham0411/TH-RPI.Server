@@ -2,7 +2,7 @@ import {createHash,createCipheriv,createDecipheriv,randomBytes,hkdfSync} from 'n
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const encode=value=>Buffer.from(JSON.stringify(value));
 const validId=value=>typeof value==='string'&&/^[a-f0-9-]{36}$/.test(value);
-const apps=new Set(['ai-agent','portfolio','mes-ticket','server']);
+const apps=new Set(['ai-agent','portfolio','ticket','server']);
 const privateTable=/user|session|token|credential|grant|account/;
 const privateField=/"(?:password|password_hash|secret|refreshToken|accessToken|smtp_url)"\s*:/i;
 
@@ -55,7 +55,7 @@ export class Coordinator {
  async write(app,input){
   if(input.schemaVersion!==1||!validId(input.id)||input.parent!==null&&!validId(input.parent)||!Array.isArray(input.events)||!input.events.length)throw Error('Invalid commit');
   const events=input.events.map(event=>{
-   if(!['INSERT','UPDATE','DELETE','TRUNCATE','BASELINE'].includes(event.action)||!['public','portfolio','mes_private','server'].includes(event.schema)||!/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/.test(event.table))throw Error('Invalid database event');
+   if(!['INSERT','UPDATE','DELETE','TRUNCATE','BASELINE'].includes(event.action)||!['public','portfolio','ticket_private','server'].includes(event.schema)||!/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/.test(event.table))throw Error('Invalid database event');
    for(const key of ['old','new'])if(event[key]!==null){if(typeof event[key]!=='string')throw Error('Raw JSON rows required');const row=JSON.parse(event[key]);if(!row||typeof row!=='object'||Array.isArray(row))throw Error('Invalid row');}
    return {schema:event.schema,table:event.table,action:event.action,old:event.old,new:event.new};
   });
