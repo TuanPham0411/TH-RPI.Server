@@ -1,0 +1,21 @@
+name: Cache Ticket storage image
+on:
+  push:
+    paths: ['.github/workflows/cache-ticket-storage.yml']
+permissions: {contents: read, packages: read}
+jobs:
+  cache:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 10
+    env:
+      DOCKER_CONFIG: /tmp/th-ticket-storage-cache-${{ github.run_id }}
+    steps:
+      - name: Cache the tested storage image without restarting services
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -eu
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          docker pull ghcr.io/tuanpham0411/th-rpi-storage:caa276f27da7c21bfc07a7f42e6c9513efe21e4e
