@@ -28,7 +28,9 @@ try:
     time.sleep(5)
     if host('systemctl','is-active','th-server-console.service',check=False).returncode!=0:raise RuntimeError('HDMI console did not become active')
     print(json.dumps({'console':'active','terminal':'tty1','release':sha,'passwordRequiredForChanges':True}))
-except Exception:
+except Exception as error:
+    print('Console install failure:',type(error).__name__,getattr(error,'stderr','')[-2500:],flush=True)
+    print(host('journalctl','-u','th-server-console.service','-n','12','--no-pager',check=False).stdout[-4000:],flush=True)
     if previous is not None:unit.write_bytes(previous)
     else:unit.unlink(missing_ok=True)
     if previous_link:
