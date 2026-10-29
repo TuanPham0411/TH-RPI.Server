@@ -1,0 +1,23 @@
+name: Validate TH-Server automation boundaries
+on:
+  push:
+    branches: [main]
+    paths: ['automation/**', '.github/workflows/automation.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python3 -m py_compile automation/*.py
+      - name: Exercise real isolated Function containers
+        env:
+          TH_FUNCTION_TEST_TAG: '${{ github.sha }}'
+          TH_SECRET_TEST_TOKEN: ci-isolation-sentinel-not-a-credential
+        run: |
+          docker pull node:22-bookworm-slim
+          docker tag node:22-bookworm-slim ghcr.io/tuanpham0411/th-ai-agent-api:$TH_FUNCTION_TEST_TAG
+          python3 -m unittest discover -s automation -p 'test_*.py' -v
