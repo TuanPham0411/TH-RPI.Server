@@ -89,10 +89,10 @@ protects host configuration separately from synchronous application saves.
 TH-Server includes a local operations console on tty1: resources, application health, network/Tailscale status, GitHub runners and USB partitions. Network and USB administration require the thadmin sudo password at the physical keyboard. See [console instructions](console/README.md). Immutable ARM64/AMD64 Docker distribution: `ghcr.io/tuanpham0411/th-rpi-console:<commit>`; the display itself runs natively through systemd to access the Pi terminal.
 
 
-## n8n operations
+## Agent Studio automation
 
-`n8n/` owns installation, fallback swap, scheduled encrypted Drive backups and isolated restore verification for the n8n workspace at `ai.th.io.vn`. Application Compose configuration and the workflow live in `TH-AI.Agent/n8n/`.
+The independent Studio at https://ai.th.io.vn is maintained in TH-AI.Agent. `automation/` owns its native timer driver, resource-isolated Function containers, private runtime socket and OAuth-client bootstrap. Credentials, workflows, runs and timer claims use the existing Drive-first ledger. The storage broker and application do not receive the Docker socket.
 
-n8n uses the dedicated `th_n8n` PostgreSQL database. Unlike the other application projections, n8n saves locally and is backed up every 30 minutes; it does not use Drive-first transaction acknowledgement. Backups include a consistent database snapshot, workflow JSON, configuration and n8n volume, encrypted in `th-data/ai-agent/n8n/backups/`. A verified upload manifest is written last. Initial deployment downloads and restores a snapshot into a disposable database before public cutover.
+`th-automation.service` drives timers over host loopback and cleans labelled Function containers on shutdown and startup. See [automation operations and isolation](automation/README.md) and [Studio configuration](https://github.com/TuanPham0411/TH-AI.Agent/blob/main/docs/STUDIO.md).
 
-See [n8n operator source](n8n/) and [workspace operations](https://github.com/TuanPham0411/TH-AI.Agent/blob/main/n8n/README.md). Keep the recovery wrapping key independently of the Pi. No provider API credentials are committed to either repository.
+n8n is retired: its containers and backup timer are stopped, while its database, volume and previously verified Drive backups remain preserved for recovery. It is not a dependency of Studio.
