@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 export function attachmentReferences(event){
  if(!event.new)return [];
  const row=JSON.parse(event.new);
- if(event.schema==='portfolio'&&event.table==='media'&&row.ready)return [{path:`portfolio/${row.id}`,size:Number(row.size),type:row.type}];
+ if(event.schema==='portfolio'&&event.table==='media'&&row.ready&&row.storage_source!=='google-photos')return [{path:`portfolio/${row.id}`,size:Number(row.size),type:row.type}];
  if(event.schema==='public'&&event.table==='files')return [{path:row.path,size:Number(row.size),type:row.type}];
  if(event.schema==='public'&&event.table==='mes_media'&&row.ready)return [{path:`media/${row.id}`,size:Number(row.size),type:row.type}];
  if(event.schema==='public'&&event.table==='mes_uploads'&&!row.complete&&Number(row.offset_bytes)>0)return [{path:`.uploads/${row.id}.part`,size:Number(row.offset_bytes),type:'application/octet-stream'}];

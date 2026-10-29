@@ -35,7 +35,7 @@ export function storageServer({coordinator,tokens,photos,ownerAuth,status}){
     if(action==='poll')return respond(200,await photos.poll(body));
     if(action==='items')return respond(200,await photos.items(body));
     if(action==='download'){
-     const {response,item}=await photos.download(body);res.statusCode=200;res.setHeader('Content-Type',item.type);
+     const {response,item}=await photos.download(body);res.statusCode=200;res.setHeader('Content-Type',response.headers.get('content-type')||item.type);
      const length=response.headers.get('content-length');if(length)res.setHeader('Content-Length',length);
      await pipeline(Readable.fromWeb(response.body),res);return;
     }
