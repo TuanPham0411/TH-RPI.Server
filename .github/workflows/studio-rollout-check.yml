@@ -1,0 +1,38 @@
+name: Inspect Studio rollout progress
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/studio-rollout-check.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Read bounded rollout status without credentials
+        run: |
+          set -eu
+          test '${{ runner.name }}' = th-server
+          uptime
+          free -h
+          timeout 20s docker ps --format '{{.Names}} {{.Status}}'
+          systemctl is-active th-automation.service || true
+          python3 - <<'PY'
+          import pathlib,json,re,time
+          base=pathlib.Path.home()/'actions-runners'
+          for folder in base.iterdir():
+              if not folder.is_dir(): continue
+              files=sorted((folder/'_diag/pages').glob('*.log'),key=lambda p:p.stat().st_mtime)[-2:]
+              phases=[]
+              for file in files:
+                  for line in file.read_text(errors='replace').splitlines()[-400:]:
+                      match=re.search(r'(\{"phase":.*\})',line)
+                      if not match:continue
+                      try:value=json.loads(match.group(1))
+                      except Exception:continue
+                      phase=value.get('phase','')
+                      if isinstance(phase,str) and re.fullmatch('[a-zA-Z0-9 _-]{1,80}',phase):
+                          phases.append({'phase':phase,'ageSeconds':round(time.time()-file.stat().st_mtime)})
+              if phases:print(json.dumps({'runnerDirectory':folder.name,'progress':phases[-8:]}))
+          PY
