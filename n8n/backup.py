@@ -33,6 +33,8 @@ def backup(verify=False,locked=False):
   if p.poll() is None:p.kill();p.wait()
  (folder/'workflows.json').write_text(json.dumps(workflows))
  configuration={'env':(HOME/'apps/n8n.env').read_text(),'deployment':state}
+ owner=HOME/'config/n8n-owner-login.json'
+ if owner.exists():configuration['initialOwnerLogin']=json.loads(owner.read_text())
  (folder/'configuration.json').write_text(json.dumps(configuration))
  image=run(['docker','inspect','th-platform-storage-1','--format','{{.Config.Image}}']).decode().strip()
  with open(folder/'volume.tar.gz','wb') as stream:
