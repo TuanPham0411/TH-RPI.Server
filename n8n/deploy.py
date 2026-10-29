@@ -35,7 +35,10 @@ def main():
   if sql("SELECT 1 FROM pg_roles WHERE rolname='th_n8n'"):raise RuntimeError('n8n database exists without recovery environment')
   values={'DB_POSTGRESDB_PASSWORD':secrets.token_hex(32),'N8N_ENCRYPTION_KEY':secrets.token_hex(32)}
  else:values=dict(line.split('=',1) for line in envpath.read_text().splitlines() if '=' in line)
- values.update({'N8N_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-runtime:'+a.release,'GATEWAY_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-gateway:'+a.release,'PUBLIC_PORT':'8083'})
+ prior_path=HOME/'state/n8n-deployment.json'
+ live=prior_path.exists() and json.loads(prior_path.read_text()).get('ready') is True
+ staging_port=8081 if live else 8083
+ values.update({'N8N_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-runtime:'+a.release,'GATEWAY_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-gateway:'+a.release,'PUBLIC_PORT':str(staging_port)})
  envpath.write_text(''.join(k+'='+v+'\n' for k,v in values.items()));envpath.chmod(0o600)
  localenv=folder/'.env';localenv.unlink(missing_ok=True);localenv.symlink_to(envpath)
  if not sql("SELECT 1 FROM pg_roles WHERE rolname='th_n8n'"):
@@ -58,7 +61,7 @@ def main():
  deadline=time.monotonic()+1800
  while time.monotonic()<deadline:
   try:
-   value,_=request(8083,'/api/ready',timeout=30)
+   value,_=request(staging_port,'/api/ready',timeout=30)
    if value.get('status')=='ready':ready=True;break
   except Exception:pass
   time.sleep(5)
@@ -71,18 +74,18 @@ def main():
  else:owner=json.loads(ownerfile.read_text())
  if not (HOME/'state/n8n-workflow.json').exists():
   if not sql("SELECT 1 FROM public.\"user\" WHERE email='eric.scorp93@gmail.com';",'th_n8n'):
-   response,headers=request(8083,'/rest/owner/setup','POST',owner)
+   response,headers=request(staging_port,'/rest/owner/setup','POST',owner)
   else:
-   response,headers=request(8083,'/rest/login','POST',{'emailOrLdapLoginId':owner['email'],'password':owner['password']})
+   response,headers=request(staging_port,'/rest/login','POST',{'emailOrLdapLoginId':owner['email'],'password':owner['password']})
   cookies=http.cookies.SimpleCookie();[cookies.load(item) for item in headers.get_all('Set-Cookie',[])]
   cookie='; '.join(k+'='+v.value for k,v in cookies.items())
   if not cookie:raise RuntimeError('n8n owner setup did not issue a session')
   credential={'name':'TH-Server Private Chat Memory','type':'postgres','data':{'host':DB,'database':'th_n8n','user':'th_n8n','password':values['DB_POSTGRESDB_PASSWORD'],'port':5432,'ssl':'disable','sshTunnel':False}}
-  response,_=request(8083,'/rest/credentials','POST',credential,cookie);memory=response.get('data',response)
+  response,_=request(staging_port,'/rest/credentials','POST',credential,cookie);memory=response.get('data',response)
   workflow=json.loads((folder/'workflow.json').read_text());workflow.pop('id',None)
   for node in workflow['nodes']:
    if node['type'].endswith('.memoryPostgresChat'):node['credentials']={'postgres':{'id':memory['id'],'name':credential['name']}}
-  response,_=request(8083,'/rest/workflows','POST',workflow,cookie);created=response.get('data',response)
+  response,_=request(staging_port,'/rest/workflows','POST',workflow,cookie);created=response.get('data',response)
   workflow_id=created['id']
   (HOME/'state/n8n-workflow.json').write_text(json.dumps({'id':workflow_id,'name':workflow['name'],'active':False}))
  elif (HOME/'state/n8n-workflow.json').exists():workflow_id=json.loads((HOME/'state/n8n-workflow.json').read_text())['id']
