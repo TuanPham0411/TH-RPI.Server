@@ -9,12 +9,12 @@ def run(args,**kwargs):
 
 def sql(value,database='postgres'):
  return run(['docker','exec','-i',DB,'psql','-X','-qAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',database],input=value.encode()).decode().strip()
-def request(port,path,method='GET',data=None,cookie=None):
+def request(port,path,method='GET',data=None,cookie=None,timeout=300):
  headers={'Content-Type':'application/json','Host':'ai.th.io.vn','Origin':'https://ai.th.io.vn'}
  if cookie:headers['Cookie']=cookie
  req=urllib.request.Request(f'http://127.0.0.1:{port}'+path,data=json.dumps(data).encode() if data is not None else None,headers=headers,method=method)
- print(json.dumps({'phase':'n8n-api','method':method,'path':path}),flush=True)
- with urllib.request.urlopen(req,timeout=300) as res:
+ if path!='/api/ready':print(json.dumps({'phase':'n8n-api','method':method,'path':path}),flush=True)
+ with urllib.request.urlopen(req,timeout=timeout) as res:
   body=res.read();value=json.loads(body) if body else {};return value,res.headers
 
 def main():
@@ -48,11 +48,17 @@ def main():
   if subprocess.run(['docker','image','inspect',image],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:
    print(json.dumps({'phase':'pulling','image':image}),flush=True);run(['docker','pull',image])
  print(json.dumps({'phase':'starting-private-staging'}),flush=True)
+ # Confirm the lightweight native probe exists in this exact runtime image.
+ run(['docker','run','--rm','--network','none','--entrypoint','/bin/busybox',values['N8N_IMAGE'],'wget','--help'])
+ override=folder/'runtime-overrides.json'
+ override.write_text(json.dumps({'services':{'n8n':{'environment':{'N8N_RUNNERS_GRANT_TOKEN_TTL':'300','N8N_RUNNERS_TASK_TIMEOUT':'180'},'healthcheck':{'test':['CMD','/bin/busybox','wget','-q','-O','/dev/null','http://127.0.0.1:5678/healthz/readiness'],'interval':'60s','timeout':'15s','retries':10,'start_period':'300s'}}}}))
+ command+=['-f',str(override)]
  run(command+['up','-d'])
  ready=False
- for attempt in range(360):
+ deadline=time.monotonic()+1800
+ while time.monotonic()<deadline:
   try:
-   value,_=request(8083,'/api/ready')
+   value,_=request(8083,'/api/ready',timeout=30)
    if value.get('status')=='ready':ready=True;break
   except Exception:pass
   time.sleep(5)
@@ -96,7 +102,7 @@ def main():
   run(command+['up','-d','--no-deps','--force-recreate','gateway'])
   for attempt in range(30):
    try:
-    value,_=request(8081,'/api/ready')
+    value,_=request(8081,'/api/ready',timeout=30)
     if value.get('status')=='ready':break
    except Exception:pass
    time.sleep(2)
