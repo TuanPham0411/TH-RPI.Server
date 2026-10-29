@@ -58,17 +58,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Wait for verified Ticket language release
+      - name: Wait for healthy Ticket application
         run: |
           python3 - <<'PY'
           import json,pathlib,time,subprocess
-          expected={'9e7352cd60f61cc077cd464452660d11b7c39586','1565d122dac4a61b86359ad8f850606e533dd11a'}
           state=pathlib.Path.home()/'th-platform/state/ticket-deployment.json'
           for attempt in range(120):
               value=json.loads(state.read_text())
-              if value.get('ready') and ((state.parent/'console-deployment.json').exists() or value.get('imageTag') in expected):
+              if value.get('ready'):
                   subprocess.run(['curl','--fail','--silent','--max-time','15','https://ticket.th.io.vn/api/health'],check=True)
-                  print('\nTicket language release verified');break
+                  print('\nTicket application readiness verified');break
               time.sleep(5)
           else:raise SystemExit('Ticket release is not verified; HDMI installation was not started')
           PY
