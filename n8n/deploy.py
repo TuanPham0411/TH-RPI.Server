@@ -34,7 +34,7 @@ def main():
   if sql("SELECT 1 FROM pg_roles WHERE rolname='th_n8n'"):raise RuntimeError('n8n database exists without recovery environment')
   values={'DB_POSTGRESDB_PASSWORD':secrets.token_hex(32),'N8N_ENCRYPTION_KEY':secrets.token_hex(32)}
  else:values=dict(line.split('=',1) for line in envpath.read_text().splitlines() if '=' in line)
- values.update({'N8N_IMAGE':'docker.n8n.io/n8nio/n8n:2.45.6','GATEWAY_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-gateway:'+a.release,'PUBLIC_PORT':'8083'})
+ values.update({'N8N_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-runtime:'+a.release,'GATEWAY_IMAGE':'ghcr.io/tuanpham0411/th-ai-n8n-gateway:'+a.release,'PUBLIC_PORT':'8083'})
  envpath.write_text(''.join(k+'='+v+'\n' for k,v in values.items()));envpath.chmod(0o600)
  localenv=folder/'.env';localenv.unlink(missing_ok=True);localenv.symlink_to(envpath)
  if not sql("SELECT 1 FROM pg_roles WHERE rolname='th_n8n'"):
