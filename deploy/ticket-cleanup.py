@@ -20,6 +20,11 @@ target=json.loads(run(['docker','inspect','ticket-ticket-1']))[0]
 if not target['State']['Running'] or target['State'].get('Health',{}).get('Status')!='healthy':raise SystemExit('The new Ticket application must be healthy.')
 run(['curl','-fsS','--max-time','15','https://ticket.th.io.vn/api/health'])
 containers=run(['docker','ps','-aq','--filter','label=com.docker.compose.project='+old]).split()
+retired_images=[]
+if containers:
+ for container in json.loads(run(['docker','inspect',*containers])):
+  image=container['Config']['Image']
+  if image.startswith('ghcr.io/tuanpham0411/th-') and image!=target['Config']['Image']:retired_images.append(image)
 volumes=run(['docker','volume','ls','-q','--filter','label=com.docker.compose.project='+old]).split()
 if completed.get('oldVolume') not in volumes:volumes.append(completed['oldVolume'])
 active_mounts=json.loads(run(['docker','inspect','th-platform-storage-1','ticket-ticket-1','ticket-database-1']))
@@ -35,6 +40,9 @@ for name in [old,prefix,'th-'+prefix,'th-'+prefix+'.ticket']:
    registration=json.loads(metadata.read_text(encoding='utf-8-sig'))
    if registration.get('agentName')=='th-ticket':raise SystemExit('The current runner is in a retired directory; move it before cleanup.')
   paths.append(directory)
+for runner in (pathlib.Path.home()/'actions-runners').iterdir():
+ retired_checkout=runner/'_work'/('TH-'+prefix.upper()+'.Ticket')
+ if retired_checkout.is_dir():paths.append(retired_checkout)
 nginx=[]
 for path in pathlib.Path('/etc/nginx/sites-enabled').glob('*'):
  try:content=path.read_text()
@@ -53,6 +61,7 @@ for volume in volumes:
  if run(['docker','ps','-aq','--filter','volume='+volume]):raise SystemExit('Another container uses a retired volume; volume retained.')
  run(['docker','volume','rm',volume])
 for network in networks:run(['docker','network','rm',network],allow_failure=True)
+for image in set(retired_images):run(['docker','image','rm',image],allow_failure=True)
 for path in paths:
  if path.is_symlink() or path.is_file():path.unlink(missing_ok=True)
  elif path.is_dir():shutil.rmtree(path)
