@@ -1,0 +1,19 @@
+name: Check Ticket runner
+on:
+  push:
+    paths: ['.github/workflows/check-ticket-runner.yml']
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect runner registrations and services without credentials
+        run: |
+          systemctl list-units --type=service --all 'actions.runner.*' --no-pager
+          python3 - <<'PY'
+          import pathlib,json
+          for path in (pathlib.Path.home()/'actions-runners').glob('*/.runner'):
+              data=json.loads(path.read_text())
+              print(json.dumps({'directory':str(path.parent),'name':data.get('agentName'),'repository':data.get('gitHubUrl') or data.get('gitHubUrlV2')}))
+          PY
