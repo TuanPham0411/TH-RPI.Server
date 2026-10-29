@@ -15,6 +15,7 @@ jobs:
           stage=pathlib.Path.home()/'th-platform/state/ticket-transition'
           result={name:(stage/name).exists() for name in ['expected-rows.json','drive-source.json','drive-changing.json','drive-verified.json','completed.json']}
           if result['drive-source.json']:result['operations']=len(json.loads((stage/'drive-source.json').read_text())['packets'])
+          result['applicationIds']=list(json.loads((pathlib.Path.home()/'th-platform/config/runtime.json').read_text())['tokens'])
           print(json.dumps(result))
           PY
-          docker ps -a --format '{{.Names}} {{.Status}}'
+          docker ps -a --format '{{.Names}} {{.Status}} {{.Image}}'
