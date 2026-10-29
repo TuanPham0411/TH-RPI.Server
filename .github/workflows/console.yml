@@ -1,0 +1,106 @@
+name: Build and deploy HDMI console
+on:
+  push:
+    branches: [main]
+    paths: ['console/**', 'deploy/snapshot.py', 'Dockerfile.console', '.github/workflows/console.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: hdmi-console-production
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python3 -m unittest discover -s console -p 'test_*.py' -v
+      - run: python3 -m py_compile console/*.py
+  image:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.console
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/tuanpham0411/th-rpi-console:${{ github.sha }}
+            ghcr.io/tuanpham0411/th-rpi-console:latest
+          labels: org.opencontainers.image.source=https://github.com/TuanPham0411/TH-RPI.Server
+  deploy:
+    needs: image
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 25
+    permissions: {contents: read, packages: read}
+    env:
+      DOCKER_CONFIG: /tmp/th-console-registry-${{ github.run_id }}
+    steps:
+      - name: Verify server runner
+        env: {SELECTED_RUNNER: '${{ runner.name }}'}
+        run: test "$SELECTED_RUNNER" = th-server
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Wait for verified Ticket language release
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,time,subprocess
+          expected='9e7352cd60f61cc077cd464452660d11b7c39586'
+          state=pathlib.Path.home()/'th-platform/state/ticket-deployment.json'
+          for attempt in range(120):
+              value=json.loads(state.read_text())
+              if value.get('ready') and ((state.parent/'console-deployment.json').exists() or value.get('imageTag')==expected):
+                  subprocess.run(['curl','--fail','--silent','--max-time','15','https://ticket.th.io.vn/api/health'],check=True)
+                  print('\nTicket language release verified');break
+              time.sleep(5)
+          else:raise SystemExit('Ticket release is not verified; HDMI installation was not started')
+          PY
+      - name: Install and start physical HDMI console
+        env: {CONSOLE_SHA: '${{ github.sha }}'}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/tuanpham0411/th-rpi-console:$CONSOLE_SHA"
+          docker pull "$image"
+          python3 - "$image" "$CONSOLE_SHA" <<'PY'
+          import fcntl,json,pathlib,subprocess,sys
+          home=pathlib.Path.home()/'th-platform'
+          with open(home/'deploy.lock','a') as lock:
+              fcntl.flock(lock,fcntl.LOCK_EX)
+              command=['docker','run','--rm','--network','none','--user','0','--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE','--cap-add','FOWNER','--cap-add','CHOWN',
+                  '--mount','type=bind,src=/,dst=/host,readonly',
+                  '--mount','type=bind,src=/opt,dst=/host/opt',
+                  '--mount','type=bind,src=/etc/systemd/system,dst=/host/etc/systemd/system',
+                  '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
+                  sys.argv[1],'python3','/app/console/install.py',sys.argv[2]]
+              subprocess.run(command,check=True)
+              state={'application':'hdmi-console','imageTag':sys.argv[2],'ready':True,'terminal':'tty1'}
+              path=home/'state/console-deployment.json';tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(state));tmp.replace(path)
+          PY
+      - name: Verify display service and application health
+        run: |
+          systemctl is-active th-server-console.service
+          test "$(systemctl show th-server-console.service --property=NRestarts --value)" = 0
+          for pair in '8080 th.io.vn health' '8081 ai.th.io.vn ready' '8082 ticket.th.io.vn health'; do
+            read -r port host endpoint <<< "$pair"
+            curl --fail --silent --show-error --max-time 15 -H "Host: $host" "http://127.0.0.1:$port/api/$endpoint"
+          done
+          python3 /opt/th-server-console/current/console.py --snapshot | python3 -c 'import json,sys;s=json.load(sys.stdin);print(json.dumps({"host":s["hostname"],"apps":s["apps"],"runnerCount":len(s["runners"]),"temperature":s["temperature"]}))'
+      - name: Snapshot console configuration to Drive
+        run: python3 deploy/snapshot.py

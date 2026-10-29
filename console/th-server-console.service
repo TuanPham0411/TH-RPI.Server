@@ -1,0 +1,24 @@
+[Unit]
+Description=TH-Server HDMI operations console
+After=systemd-user-sessions.service network.target docker.service
+Conflicts=getty@tty1.service
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=simple
+User=root
+Environment=TERM=linux LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/th-server-console/current/console.py
+Restart=always
+RestartSec=3
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVTDisallocate=yes
+MemoryMax=96M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
