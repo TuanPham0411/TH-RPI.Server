@@ -32,3 +32,9 @@ jobs:
                   data=json.loads(path.read_text());print(name,json.dumps({k:data.get(k) for k in ['ready','version','workflowId','verified','restoreVerified']}))
           PY
           curl --silent --max-time 3 --output /dev/null --write-out 'Staging n8n HTTP %{http_code}\n' http://127.0.0.1:8083/api/ready || true
+          docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep -E 'n8n|console'
+          for name in th-n8n-n8n-1 th-n8n-gateway-1; do
+            docker inspect "$name" --format '{{.Name}} {{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' || true
+            docker logs --tail 30 "$name" 2>&1 || true
+          done
+          find ~/actions-runners -path '*/_diag/Worker_*.log' -mmin -100 -type f -print | tail -5
