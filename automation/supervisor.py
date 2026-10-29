@@ -32,7 +32,7 @@ def execute(body):
    process.wait(timeout=2)
    try:result=json.loads(out)
    except Exception:raise ValueError('Function did not return valid JSON.')
-   if process.returncode or 'error' in result:raise ValueError(result.get('error','Function không thành công.'))
+   if process.returncode or 'error' in result:raise ValueError(result.get('error','Function execution failed.'))
    return result
   finally:
    selector.close()
