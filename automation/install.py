@@ -17,6 +17,7 @@ After=docker.service network-online.target
 User=thadmin
 SupplementaryGroups=docker
 ExecStart=/usr/bin/python3 /opt/th-server-automation/current/supervisor.py
+ExecStopPost=/usr/bin/python3 /opt/th-server-automation/current/supervisor.py --cleanup
 Restart=on-failure
 RestartSec=5
 UMask=0077
