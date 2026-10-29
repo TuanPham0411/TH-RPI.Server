@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Restore Drive history into disposable databases without changing production rows."""
-import datetime,fcntl,hashlib,http.client,json,os,pathlib,socket,subprocess,urllib.parse
+import argparse,datetime,fcntl,hashlib,http.client,json,os,pathlib,socket,subprocess,urllib.parse
+parser=argparse.ArgumentParser();parser.add_argument('--application',choices=['ai-agent','portfolio','ticket']);selection=parser.parse_args().application
 home=pathlib.Path.home()/'th-platform'
 os.umask(0o077)
 lock=open(home/'deploy.lock','a');fcntl.flock(lock,fcntl.LOCK_EX)
@@ -38,6 +39,7 @@ for marker in reversed(broker('/v1/history',{})['history']):
 if not snapshot:raise RuntimeError('Run the server configuration snapshot before recovery verification')
 
 for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-operator.js'),('portfolio','database','th_portfolio','dist/server/storage-operator.cjs'),('ticket','database','ticket','dist/server/storage-operator.cjs')]:
+ if selection and app!=selection:continue
  state=json.loads((home/'state'/(app+'-deployment.json')).read_text())
  if not state.get('ready') or not state.get('driveFirst'):raise RuntimeError('Application cutover is not ready')
  release=pathlib.Path(state['release']);container=app+'-'+service+'-1'
