@@ -113,4 +113,6 @@ jobs:
         run: |
           docker run --rm --network none --user 0 --cap-drop ALL --cap-add DAC_OVERRIDE --device /dev/vcs1:/dev/vcs1:r ghcr.io/tuanpham0411/th-rpi-console:${{ github.sha }} python3 -c 'import json;screen=open("/dev/vcs1","rb").read().decode("ascii","replace");assert "TH-SERVER" in screen and "Overview" in screen;print(json.dumps({"physicalTty1Screen":True,"consoleHeaderVerified":True}))'
       - name: Snapshot console configuration to Drive
-        run: python3 deploy/snapshot.py
+        run: |
+          install -m 700 deploy/snapshot.py ~/th-platform/operator/snapshot.py
+          python3 ~/th-platform/operator/snapshot.py
