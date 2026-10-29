@@ -31,6 +31,7 @@ WantedBy=swap.target
  'th-n8n-backup.service':'''[Unit]
 Description=Verified n8n PostgreSQL and JSON backup to private Google Drive
 After=docker.service network-online.target
+ConditionPathExists=/home/thadmin/th-platform/state/n8n-deployment.json
 [Service]
 Type=oneshot
 User=thadmin
@@ -43,8 +44,7 @@ Nice=10
  'th-n8n-backup.timer':'''[Unit]
 Description=n8n backup every 30 minutes
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=30min
+OnCalendar=*-*-* *:00,30:00
 Persistent=true
 Unit=th-n8n-backup.service
 [Install]
