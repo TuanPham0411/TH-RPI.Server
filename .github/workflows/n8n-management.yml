@@ -1,0 +1,25 @@
+name: Validate n8n management and recovery
+on:
+  push:
+    branches: [main]
+    paths: ['n8n/**', '.github/workflows/n8n-management.yml']
+  pull_request:
+    paths: ['n8n/**', '.github/workflows/n8n-management.yml']
+permissions: {contents: read}
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env: {POSTGRES_PASSWORD: ci-only}
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v5
+        with: {node-version: '22'}
+      - run: python3 -m py_compile n8n/*.py
+      - run: node --test n8n/codec.test.mjs
+      - run: python3 -m unittest discover -s n8n -p 'test_*.py' -v
+        env: {N8N_TEST_POSTGRES: '${{ job.services.postgres.id }}'}
