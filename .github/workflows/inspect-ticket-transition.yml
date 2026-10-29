@@ -1,0 +1,22 @@
+name: Inspect Ticket transition
+on:
+  push:
+    paths: ['.github/workflows/inspect-ticket-transition.yml']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Read redacted transition failure summaries
+        run: |
+          python3 - <<'PY'
+          import pathlib,re,json
+          stage=pathlib.Path.home()/'th-platform/state/ticket-transition'
+          print(json.dumps({'files':[p.name for p in stage.iterdir()]}))
+          for path in stage.glob('command-error-*.log'):
+              content=path.read_text(errors='replace')
+              lines=[line for line in content.splitlines() if 'ERROR:' in line or 'FATAL:' in line or 'Error' in line]
+              for line in lines[:3]:print(path.name+': '+re.sub(r"'[^']*'|\"[^\"]*\"", '[redacted]', line)[:300])
+          PY
+          docker ps -a --format '{{.Names}} {{.Status}}'
