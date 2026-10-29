@@ -1,0 +1,34 @@
+name: Diagnose Portfolio rollout
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/portfolio-rollout-check.yml]
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect deployment progress without private data
+        env: {SELECTED_RUNNER: '${{ runner.name }}'}
+        run: |
+          set -eu
+          test "$SELECTED_RUNNER" = th-server
+          docker ps -a --format '{{.Names}} {{.Status}}' | head -n 20
+          python3 - <<'PY'
+          import pathlib,fcntl,json
+          home=pathlib.Path.home()/'th-platform'
+          with open(home/'deploy.lock','a') as lock:
+              try:
+                  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                  print('Deployment lock: free')
+              except BlockingIOError:
+                  print('Deployment lock: held')
+          print('Portfolio maintenance:',(home/'run/maintenance-portfolio').exists())
+          state=home/'state/portfolio-deployment.json'
+          if state.exists():
+              value=json.loads(state.read_text())
+              print(json.dumps({k:value.get(k) for k in ['imageTag','ready']}))
+          PY
+          docker logs --tail 12 portfolio-portfolio-1 2>&1 | sed -E 's/(token|password|secret)=[^ ]+/REDACTED/gi'
+          curl --silent --max-time 10 --output /dev/null --write-out 'Public health %{http_code}\n' https://th.io.vn/api/health || true
