@@ -2,7 +2,7 @@
 """TH-Server timer driver and bounded, network-isolated Function executor."""
 import http.server,socketserver,socket,os,pathlib,json,subprocess,tempfile,selectors,time,uuid,threading,hmac,urllib.request,sys,re
 HOME=pathlib.Path.home()/'th-platform';RUN=HOME/'run';ENV=HOME/'apps/ai-agent.env'
-WORKER=r'''const fs=require('node:fs'),vm=require('node:vm');(async()=>{try{const p=JSON.parse(fs.readFileSync('/input.json','utf8'));const output=await vm.runInNewContext('(async function(input){"use strict";'+p.code+'\n})(input)',{input:p.input,console:Object.freeze({log(){},warn(){},error(){}})},{timeout:1000});const text=JSON.stringify(output??null);if(text.length>180000)throw Error('Kết quả vượt 180 KB.');process.stdout.write(JSON.stringify({output:JSON.parse(text)}));}catch(e){process.stdout.write(JSON.stringify({error:String(e.message).slice(0,1000)}));process.exitCode=1;}})();'''
+WORKER=r'''const fs=require('node:fs'),vm=require('node:vm');(async()=>{try{const p=JSON.parse(fs.readFileSync('/input.json','utf8'));const output=await vm.runInNewContext('(async function(input){"use strict";'+p.code+'\n})(input)',{input:p.input,console:Object.freeze({log(){},warn(){},error(){}})},{timeout:1000});const text=JSON.stringify(output??null);if(text.length>180000)throw Error('Function output exceeds 180 KB.');process.stdout.write(JSON.stringify({output:JSON.parse(text)}));}catch(e){process.stdout.write(JSON.stringify({error:String(e.message).slice(0,1000)}));process.exitCode=1;}})();'''
 slot=threading.BoundedSemaphore(1)
 def cleanup():
  result=subprocess.run(['docker','ps','-aq','--filter','label=th.automation.function=1'],capture_output=True,text=True,timeout=20,check=True)
@@ -12,9 +12,9 @@ def token():
  values=dict(line.split('=',1) for line in ENV.read_text().splitlines() if '=' in line and not line.startswith('#'))
  return values['TH_STORAGE_TOKEN'].strip().strip('"')
 def execute(body):
- if not isinstance(body,dict) or not isinstance(body.get('code'),str) or len(body['code'])>24000 or len(json.dumps(body.get('input')))>200000:raise ValueError('Function hoặc input quá lớn.')
+ if not isinstance(body,dict) or not isinstance(body.get('code'),str) or len(body['code'])>24000 or len(json.dumps(body.get('input')))>200000:raise ValueError('Function code or input is too large.')
  state=json.loads((HOME/'state/ai-agent-deployment.json').read_text());sha=state['imageTag']
- if len(sha)!=40 or any(c not in '0123456789abcdef' for c in sha):raise ValueError('Thiếu image bất biến đã được triển khai.')
+ if len(sha)!=40 or any(c not in '0123456789abcdef' for c in sha):raise ValueError('No immutable Function runtime image is deployed.')
  name='th-function-'+uuid.uuid4().hex
  with tempfile.TemporaryDirectory(prefix='th-function-') as folder:
   source=pathlib.Path(folder)/'input.json';source.write_text(json.dumps(body));source.chmod(0o444)
@@ -23,15 +23,15 @@ def execute(body):
   selector=selectors.DefaultSelector();selector.register(process.stdout,selectors.EVENT_READ,'out');selector.register(process.stderr,selectors.EVENT_READ,'err');out=bytearray();errors=bytearray();deadline=time.monotonic()+12
   try:
    while selector.get_map():
-    if time.monotonic()>deadline:raise ValueError('Function vượt thời gian 12 giây (bao gồm khởi động container).')
+    if time.monotonic()>deadline:raise ValueError('Function exceeded 12 seconds including container startup.')
     for key,_ in selector.select(timeout=.2):
      chunk=os.read(key.fileobj.fileno(),8192)
      if not chunk:selector.unregister(key.fileobj);continue
      target=out if key.data=='out' else errors;target.extend(chunk)
-     if len(out)>200000 or len(errors)>30000:raise ValueError('Function xuất quá nhiều dữ liệu.')
+     if len(out)>200000 or len(errors)>30000:raise ValueError('Function produced too much output.')
    process.wait(timeout=2)
    try:result=json.loads(out)
-   except Exception:raise ValueError('Function không trả về JSON hợp lệ.')
+   except Exception:raise ValueError('Function did not return valid JSON.')
    if process.returncode or 'error' in result:raise ValueError(result.get('error','Function không thành công.'))
    return result
   finally:
@@ -46,8 +46,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
  def do_POST(self):
   if self.path!='/function' or not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+token()):return self.answer(403,{'error':'Function authentication required'})
   length=int(self.headers.get('Content-Length','0'))
-  if not 0<length<=250000:return self.answer(413,{'error':'Function request quá lớn.'})
-  if not slot.acquire(blocking=False):return self.answer(409,{'error':'Function khác đang chạy.'})
+  if not 0<length<=250000:return self.answer(413,{'error':'Function request is too large.'})
+  if not slot.acquire(blocking=False):return self.answer(409,{'error':'Another Function is already running.'})
   try:
    self.connection.settimeout(5);body=json.loads(self.rfile.read(length));self.answer(200,execute(body))
   except Exception as error:
