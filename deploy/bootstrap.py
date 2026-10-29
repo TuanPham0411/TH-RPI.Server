@@ -72,7 +72,7 @@ const c=JSON.parse(fs.readFileSync('/config/runtime.json','utf8'));
 const body=JSON.stringify({parent:null});
 const r=http.request({socketPath:'/run/th-storage/storage.sock',path:'/v1/history',method:'POST',headers:{Authorization:'Bearer '+c.tokens.server,'X-TH-Application':'server','Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}},res=>{res.resume();res.on('end',()=>process.exit(res.statusCode===200?0:1))});r.on('error',()=>process.exit(1));r.end(body);'''
 import time
-for attempt in range(45):
+for attempt in range(300):
     result = subprocess.run(command+['exec','-T','storage','node','-e',check],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if result.returncode == 0: break
     time.sleep(2)
