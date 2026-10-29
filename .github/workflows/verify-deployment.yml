@@ -24,7 +24,7 @@ jobs:
           apps=[
             ('ai-agent','ai-agent-api-1','server/storage-operator.js','https://ai.th.io.vn/api/ready'),
             ('portfolio','portfolio-portfolio-1','dist/server/storage-operator.cjs','https://th.io.vn/'),
-            ('mes-ticket','mes-ticket-mes-1','dist/server/storage-operator.cjs','https://mes.th.io.vn/')]
+            ('ticket','ticket-ticket-1','dist/server/storage-operator.cjs','https://ticket.th.io.vn/')]
           incomplete=[]
           for app,container,operator,url in apps:
               info=json.loads(subprocess.check_output(['docker','inspect',container],text=True))[0]

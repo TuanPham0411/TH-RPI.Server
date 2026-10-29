@@ -37,7 +37,7 @@ for marker in reversed(broker('/v1/history',{})['history']):
  if snapshot:break
 if not snapshot:raise RuntimeError('Run the server configuration snapshot before recovery verification')
 
-for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-operator.js'),('portfolio','database','th_portfolio','dist/server/storage-operator.cjs'),('mes-ticket','database','mes_ticket','dist/server/storage-operator.cjs')]:
+for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-operator.js'),('portfolio','database','th_portfolio','dist/server/storage-operator.cjs'),('ticket','database','ticket','dist/server/storage-operator.cjs')]:
  state=json.loads((home/'state'/(app+'-deployment.json')).read_text())
  if not state.get('ready') or not state.get('driveFirst'):raise RuntimeError('Application cutover is not ready')
  release=pathlib.Path(state['release']);container=app+'-'+service+'-1'
@@ -47,7 +47,7 @@ for app,service,database,operator in [('ai-agent','db','th_ai','server/storage-o
  definition=snapshot['databases'][app]
  if definition['release']!=state['imageTag']:raise RuntimeError('Snapshot the deployed schema before recovery verification')
  schema=definition['schema'].encode()
- tables=json.loads(sql(container,database,"SELECT coalesce(json_agg(json_build_object('schema',schemaname,'table',tablename) ORDER BY schemaname,tablename),'[]') FROM pg_tables WHERE schemaname IN ('public','portfolio','mes_private') AND tablename NOT IN ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations')"))
+ tables=json.loads(sql(container,database,"SELECT coalesce(json_agg(json_build_object('schema',schemaname,'table',tablename) ORDER BY schemaname,tablename),'[]') FROM pg_tables WHERE schemaname IN ('public','portfolio','ticket_private') AND tablename NOT IN ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations')"))
  credentials=json.loads(command(['docker','inspect',container]))[0]['Config']['Env']
  password=next(item.split('=',1)[1] for item in credentials if item.startswith('POSTGRES_PASSWORD='))
  environment={**os.environ,'DATABASE_URL':'postgresql://postgres:'+urllib.parse.quote(password,safe='')+'@'+service+':5432/'+target}

@@ -4,7 +4,7 @@ import {attachmentReferences} from './attachments.mjs';
 const quote=value=>'"'+value.replaceAll('"','""')+'"';
 const qualified=(schema,table)=>quote(schema)+'.'+quote(table);
 const migrationTables=['schema_migrations','portfolio_schema_migrations','ai_schema_migrations'];
-const allowed=table=>['public','portfolio','mes_private'].includes(table.schema)&&!migrationTables.includes(table.table);
+const allowed=table=>['public','portfolio','ticket_private'].includes(table.schema)&&!migrationTables.includes(table.table);
 async function migrations(db){
  const result={};
  for(const name of migrationTables){const {rows:[exists]}=await db.query('SELECT to_regclass($1) AS name',['public.'+name]);if(exists.name)result[name]=(await db.query(`SELECT row_to_json(t)::text AS data FROM public.${quote(name)} t ORDER BY row_to_json(t)::text COLLATE "C"`)).rows.map(row=>row.data);}
@@ -17,13 +17,13 @@ export async function baseline(db,broker){
   await db.query('SELECT public.th_storage_lock()');
   // Operator must stop all application/background writers before invoking this.
   const {history}=await broker('/v1/history',{});const parent=history.at(-1)?.id??null;
-  const {rows:tables}=await db.query("select schemaname as schema,tablename as table from pg_tables where schemaname in ('public','portfolio','mes_private') and tablename not in ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations') order by schemaname,tablename");
+  const {rows:tables}=await db.query("select schemaname as schema,tablename as table from pg_tables where schemaname in ('public','portfolio','ticket_private') and tablename not in ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations') order by schemaname,tablename");
   const events=[];
   for(const table of tables){
    const rows=await db.query(`SELECT row_to_json(t)::text AS data FROM ${qualified(table.schema,table.table)} t ORDER BY row_to_json(t)::text COLLATE "C"`);
    for(const row of rows.rows)events.push({...table,action:'BASELINE',old:null,new:row.data});
   }
-  const {rows:sequences}=await db.query("select schemaname as schema,sequencename as name,last_value from pg_sequences where schemaname in ('public','portfolio','mes_private') order by schemaname,sequencename");
+  const {rows:sequences}=await db.query("select schemaname as schema,sequencename as name,last_value from pg_sequences where schemaname in ('public','portfolio','ticket_private') order by schemaname,sequencename");
   const metadata={tables,sequences,migrations:await migrations(db),release:process.env.TH_RELEASE||null};
   // Empty databases still have a durable baseline and explicit table inventory.
   events.push({schema:'server',table:'manifest',action:'BASELINE',old:null,new:JSON.stringify({kind:'database-baseline',...metadata})});
@@ -59,8 +59,8 @@ export async function restore(db,broker,{confirmEmpty=false,restoreFile}={}){
    if(event.new!==null)await db.query(`INSERT INTO ${table} OVERRIDING SYSTEM VALUE SELECT * FROM json_populate_record(NULL::${table},$1::json)`,[event.new]);
   }
   // Restore sequence positions from both the baseline and the actual records.
-  for(const sequence of base.sequences||[]){if(!['public','portfolio','mes_private'].includes(sequence.schema))throw Error('Invalid sequence');if(sequence.last_value!==null)await db.query('SELECT setval($1::regclass,$2::bigint,true)',[qualified(sequence.schema,sequence.name),sequence.last_value]);}
-  const owned=await db.query(`select ns.nspname as schema,t.relname as table,a.attname as column,pg_get_serial_sequence(format('%I.%I',ns.nspname,t.relname),a.attname) as sequence from pg_class t join pg_namespace ns on ns.oid=t.relnamespace join pg_attribute a on a.attrelid=t.oid and a.attnum>0 and not a.attisdropped where ns.nspname in ('public','portfolio','mes_private') and t.relkind='r'`);
+  for(const sequence of base.sequences||[]){if(!['public','portfolio','ticket_private'].includes(sequence.schema))throw Error('Invalid sequence');if(sequence.last_value!==null)await db.query('SELECT setval($1::regclass,$2::bigint,true)',[qualified(sequence.schema,sequence.name),sequence.last_value]);}
+  const owned=await db.query(`select ns.nspname as schema,t.relname as table,a.attname as column,pg_get_serial_sequence(format('%I.%I',ns.nspname,t.relname),a.attname) as sequence from pg_class t join pg_namespace ns on ns.oid=t.relnamespace join pg_attribute a on a.attrelid=t.oid and a.attnum>0 and not a.attisdropped where ns.nspname in ('public','portfolio','ticket_private') and t.relkind='r'`);
   for(const row of owned.rows)if(row.sequence){const {rows:[maximum]}=await db.query(`SELECT max(${quote(row.column)})::text AS value FROM ${qualified(row.schema,row.table)}`);if(maximum.value!==null)await db.query('SELECT setval($1::regclass,greatest((SELECT last_value FROM '+row.sequence+'),$2::bigint),true)',[row.sequence,maximum.value]);}
   await verifyForeignKeys(db);
   const references=new Map();
@@ -84,7 +84,7 @@ async function verifyForeignKeys(db){
  const {rows}=await db.query(`select c.conrelid::regclass::text as child,c.confrelid::regclass::text as parent,c.confmatchtype as match,
  array(select attname::text from pg_attribute where attrelid=c.conrelid and attnum=any(c.conkey) order by array_position(c.conkey,attnum)) as ck,
  array(select attname::text from pg_attribute where attrelid=c.confrelid and attnum=any(c.confkey) order by array_position(c.confkey,attnum)) as pk
- from pg_constraint c join pg_namespace n on n.oid=c.connamespace where c.contype='f' and n.nspname in ('public','portfolio','mes_private')`);
+ from pg_constraint c join pg_namespace n on n.oid=c.connamespace where c.contype='f' and n.nspname in ('public','portfolio','ticket_private')`);
  for(const row of rows){
   const all=row.ck.map(key=>`c.${quote(key)} IS NOT NULL`).join(' AND ');
   const join=row.ck.map((key,i)=>`c.${quote(key)}=p.${quote(row.pk[i])}`).join(' AND ');

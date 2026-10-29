@@ -20,10 +20,10 @@ test('media streaming adapter rejects symlinks and mismatched sizes',async()=>{
 });
 test('Unix broker rejects missing credentials and cross-application tokens',async()=>{
  const root=await mkdtemp(join(tmpdir(),'th-socket-'));const socket=join(root,'storage.sock');
- const server=storageServer({coordinator:{check:async()=>({ready:true})},tokens:{portfolio:'portfolio-only','mes-ticket':'mes-only'}});
+ const server=storageServer({coordinator:{check:async()=>({ready:true})},tokens:{portfolio:'portfolio-only','ticket':'ticket-only'}});
  await new Promise(resolve=>server.listen(socket,resolve));
  const request=(application,token)=>new Promise((resolve,reject)=>{const body='{"parent":null}';const req=http.request({socketPath:socket,path:'/v1/check',method:'POST',headers:{'X-TH-Application':application,Authorization:`Bearer ${token}`,'Content-Length':Buffer.byteLength(body)}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});req.on('error',reject);req.end(body);});
- try{assert.equal(await request('portfolio','mes-only'),403);assert.equal(await request('portfolio','portfolio-only'),200);assert.equal(await request('server','portfolio-only'),403);}finally{await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true});}
+ try{assert.equal(await request('portfolio','ticket-only'),403);assert.equal(await request('portfolio','portfolio-only'),200);assert.equal(await request('server','portfolio-only'),403);}finally{await new Promise(resolve=>server.close(resolve));await rm(root,{recursive:true,force:true});}
 });
 test('missing cache is restored from the exact local projection version and then read locally',async()=>{
  const root=await mkdtemp(join(tmpdir(),'th-cache-')),socket=join(root,'broker.sock');

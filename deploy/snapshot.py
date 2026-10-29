@@ -19,7 +19,7 @@ def broker(path,value):
 files={};paths=[pathlib.Path('/etc/hostname'),pathlib.Path('/etc/hosts'),pathlib.Path('/etc/nginx/nginx.conf'),pathlib.Path('/etc/systemd/system/cloudflared.service')]
 paths+=list(pathlib.Path('/etc/nginx/sites-available').glob('*'))
 paths+=list((home/'config').glob('*.json'))+list((home/'apps').glob('*.env'))
-for app in ['ai-agent','portfolio','mes-ticket']:
+for app in ['ai-agent','portfolio','ticket']:
  paths+=[pathlib.Path.home()/'apps'/app/name for name in ['.env','compose.yaml','storage.compose.yaml','database-init.sh']]
  state=home/'state'/(app+'-deployment.json')
  if state.exists():
@@ -30,7 +30,7 @@ for path in paths:
   if path.is_file() and not path.is_symlink() and path.stat().st_size<=1024*1024:files[str(path)]=path.read_text()
  except (PermissionError,UnicodeError):pass
 databases={}
-for app,service,database in [('ai-agent','db','th_ai'),('portfolio','database','th_portfolio'),('mes-ticket','database','mes_ticket')]:
+for app,service,database in [('ai-agent','db','th_ai'),('portfolio','database','th_portfolio'),('ticket','database','ticket')]:
  state=json.loads((home/'state'/(app+'-deployment.json')).read_text())
  container=app+'-'+service+'-1'
  def dump(*arguments):

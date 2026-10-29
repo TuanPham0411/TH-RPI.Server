@@ -35,12 +35,12 @@ source = pathlib.Path(__file__).resolve().parents[1]
 release = home / 'releases' / args.image_tag
 release.mkdir(exist_ok=True, mode=0o700)
 shutil.copyfile(source / 'compose.yaml', release / 'compose.yaml')
-metadata = json.loads(run('docker','inspect','mes-ticket-mes-1', capture_output=True).stdout)[0]
+metadata = json.loads(run('docker','inspect','ticket-ticket-1', capture_output=True).stdout)[0]
 environment = dict(item.split('=',1) for item in metadata['Config']['Env'] if '=' in item)
 client_id = environment.get('GOOGLE_DRIVE_CLIENT_ID') or environment.get('GOOGLE_CLIENT_ID')
 client_secret = environment.get('GOOGLE_DRIVE_CLIENT_SECRET') or environment.get('GOOGLE_CLIENT_SECRET')
-if not client_id or not client_secret: raise SystemExit('Existing MES Drive OAuth client is missing')
-credentials = json.loads(run('docker','exec','mes-ticket-mes-1','node','-e',
+if not client_id or not client_secret: raise SystemExit('Existing TICKET Drive OAuth client is missing')
+credentials = json.loads(run('docker','exec','ticket-ticket-1','node','-e',
     'process.stdout.write(require("node:fs").readFileSync(process.env.DRIVE_TOKEN_FILE,"utf8"))', capture_output=True).stdout)
 if not credentials.get('refreshToken') or not credentials.get('email'): raise SystemExit('Existing offline Drive authorization is missing')
 config_path = home / 'config/runtime.json'
@@ -50,7 +50,7 @@ if config_path.exists():
         raise SystemExit('OAuth identity/key changed; preserve the old recovery key and review rotation first')
 else:
     config = {'oauth':{'clientId':client_id,'clientSecret':client_secret,'expectedEmail':credentials['email']},
-              'tokens':{name:secrets.token_hex(32) for name in ['ai-agent','portfolio','mes-ticket','server']}}
+              'tokens':{name:secrets.token_hex(32) for name in ['ai-agent','portfolio','ticket','server']}}
     atomic_json(config_path, config)
 atomic_json(home / 'config/drive-credentials.json', credentials)
 # Preserve a recovery key separately from the encrypted Drive account rows.
@@ -80,11 +80,11 @@ else:
     run(*command,'logs','--tail=30','storage')
     raise SystemExit('Broker is not ready; application storage modes were not changed')
 backup = {'platformConfig':config,'driveCredentials':credentials,'containers':{},'files':{}}
-for container in ['ai-agent-api-1','portfolio-portfolio-1','mes-ticket-mes-1']:
+for container in ['ai-agent-api-1','portfolio-portfolio-1','ticket-ticket-1']:
     backup['containers'][container] = json.loads(run('docker','inspect',container,capture_output=True).stdout)[0]
 paths = [pathlib.Path('/etc/hostname'),pathlib.Path('/etc/hosts'),pathlib.Path('/etc/nginx/nginx.conf'),pathlib.Path('/etc/systemd/system/cloudflared.service')]
 paths += list(pathlib.Path('/etc/nginx/sites-available').glob('*'))
-paths += [pathlib.Path.home()/'apps'/name/'.env' for name in ['ai-agent','portfolio','mes-ticket']]
+paths += [pathlib.Path.home()/'apps'/name/'.env' for name in ['ai-agent','portfolio','ticket']]
 for path in paths:
     if path.is_file() and not path.is_symlink() and path.stat().st_size < 1024*1024:
         try: backup['files'][str(path)] = path.read_text()

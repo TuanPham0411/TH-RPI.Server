@@ -21,12 +21,13 @@ async function updateIndex({application,events,files,marker}){
  await writeFile(`/state/${application}.tmp`,JSON.stringify({operation:marker.id,files:index}),{mode:0o600});
  await rename(`/state/${application}.tmp`,`/state/${application}.json`);
 }
-const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret,attachment:attachmentWriter(transport,{'ai-agent':'/source/ai','portfolio':'/source/portfolio/files','mes-ticket':'/source/mes/files'}),onCommitted:updateIndex});
+const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret,attachment:attachmentWriter(transport,{'ai-agent':'/source/ai','portfolio':'/source/portfolio/files','ticket':'/source/ticket/files'}),onCommitted:updateIndex});
 let photosCredentials=null;
 const authRecords=[];
 for(const app of Object.keys(config.tokens)){
- await coordinator.head(app);
- for(const marker of await coordinator.history(app)){
+ const history=await coordinator.history(app);
+ coordinator.heads.set(app,history.at(-1)?.id??null);
+ for(const marker of history){
   const packet=await coordinator.event(app,marker);await updateIndex({application:app,events:packet.events,files:packet.files,marker});
   if(app==='server')for(const event of packet.events)if(event.table==='credentials'&&event.new){const value=JSON.parse(event.new);if(value.kind==='photos-oauth')photosCredentials=value;if(value.kind==='owner-session'||value.kind==='owner-revocation')authRecords.push(value);}
  }

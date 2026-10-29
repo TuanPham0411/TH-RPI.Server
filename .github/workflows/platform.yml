@@ -1,7 +1,7 @@
 name: Build and deploy storage platform
 on:
   push:
-    branches: [main, storage/platform]
+    branches: [main, storage/platform, transition/ticket-internals]
     paths: ['storage/**', 'tests/**', 'deploy/**', 'Dockerfile', 'compose.yaml', 'package*.json', '.github/workflows/platform.yml']
   pull_request:
     paths: ['storage/**', 'tests/**', 'deploy/**', 'Dockerfile', 'compose.yaml', 'package*.json', '.github/workflows/platform.yml']

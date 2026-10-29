@@ -41,7 +41,7 @@ language plpgsql security definer set search_path=pg_catalog as $$ begin perform
 create or replace function public.th_storage_head() returns text
 language sql security definer set search_path=pg_catalog,th_storage as $$ select operation from th_storage.head where id $$;
 do $$ declare t record; begin
- for t in select schemaname,tablename from pg_tables where schemaname in ('public','portfolio','mes_private')
+ for t in select schemaname,tablename from pg_tables where schemaname in ('public','portfolio','ticket_private')
  and tablename not in ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations') loop
   execute format('drop trigger if exists th_capture_row on %I.%I',t.schemaname,t.tablename);
   execute format('create trigger th_capture_row after insert or update or delete on %I.%I for each row execute function th_storage.capture()',t.schemaname,t.tablename);
