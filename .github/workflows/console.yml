@@ -62,11 +62,11 @@ jobs:
         run: |
           python3 - <<'PY'
           import json,pathlib,time,subprocess
-          expected='9e7352cd60f61cc077cd464452660d11b7c39586'
+          expected={'9e7352cd60f61cc077cd464452660d11b7c39586','1565d122dac4a61b86359ad8f850606e533dd11a'}
           state=pathlib.Path.home()/'th-platform/state/ticket-deployment.json'
           for attempt in range(120):
               value=json.loads(state.read_text())
-              if value.get('ready') and ((state.parent/'console-deployment.json').exists() or value.get('imageTag')==expected):
+              if value.get('ready') and ((state.parent/'console-deployment.json').exists() or value.get('imageTag') in expected):
                   subprocess.run(['curl','--fail','--silent','--max-time','15','https://ticket.th.io.vn/api/health'],check=True)
                   print('\nTicket language release verified');break
               time.sleep(5)
@@ -83,11 +83,12 @@ jobs:
           home=pathlib.Path.home()/'th-platform'
           with open(home/'deploy.lock','a') as lock:
               fcntl.flock(lock,fcntl.LOCK_EX)
-              command=['docker','run','--rm','--network','none','--user','0','--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE','--cap-add','FOWNER','--cap-add','CHOWN',
+              command=['docker','run','--rm','--network','none','--pid','host','--user','0','--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE','--cap-add','FOWNER','--cap-add','CHOWN',
                   '--mount','type=bind,src=/,dst=/host,readonly',
                   '--mount','type=bind,src=/opt,dst=/host/opt',
                   '--mount','type=bind,src=/etc/systemd/system,dst=/host/etc/systemd/system',
                   '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
+                  '--mount','type=bind,src=/run/dbus,dst=/host/run/dbus,readonly',
                   '--tmpfs','/host/tmp:rw,nosuid,nodev,noexec,size=16m',
                   '--tmpfs','/host/var/tmp:rw,nosuid,nodev,noexec,size=16m',
                   sys.argv[1],'python3','/app/console/install.py',sys.argv[2]]
