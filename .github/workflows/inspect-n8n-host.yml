@@ -21,3 +21,14 @@ jobs:
             read -r port host endpoint <<< "$pair"
             curl --fail --silent --show-error --max-time 10 -H "Host: $host" "http://127.0.0.1:$port/api/$endpoint"
           done
+          docker ps -a --format '{{.Names}} {{.Status}}'
+          cat /proc/swaps
+          python3 - <<'PY'
+          import pathlib,json
+          home=pathlib.Path.home()/'th-platform'
+          for name in ['n8n-deployment.json','n8n-backup.json']:
+              path=home/'state'/name
+              if path.exists():
+                  data=json.loads(path.read_text());print(name,json.dumps({k:data.get(k) for k in ['ready','version','workflowId','verified','restoreVerified']}))
+          PY
+          curl --silent --max-time 3 --output /dev/null --write-out 'Staging n8n HTTP %{http_code}\n' http://127.0.0.1:8083/api/ready || true
