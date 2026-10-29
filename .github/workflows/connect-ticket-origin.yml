@@ -18,7 +18,7 @@ jobs:
           trap 'rm -rf "$WORK"' EXIT
           curl -fsSL --retry 3 https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/18a654431c2ee4da6a0e8be497489950d3d723ab/deploy/ticket-nginx-install.mjs -o "$WORK/install.mjs"
           curl -fsSL --retry 3 https://raw.githubusercontent.com/TuanPham0411/TH-RPI.Server/18a654431c2ee4da6a0e8be497489950d3d723ab/deploy/ticket-nginx.conf -o "$WORK/ticket-nginx.conf"
-          docker run --rm --user 0 --network none --pid host --read-only --cap-drop ALL --cap-add SYS_CHROOT --cap-add DAC_OVERRIDE --cap-add KILL -v /:/host:ro -v /etc/nginx:/host/etc/nginx:rw -v /var/log/nginx:/host/var/log/nginx:rw -v "$WORK:/control:ro" -v "$BACKUP:/backup" --entrypoint node ghcr.io/tuanpham0411/th-rpi-storage:caa276f27da7c21bfc07a7f42e6c9513efe21e4e /control/install.mjs install
+          docker run --rm --user 0 --network none --pid host --read-only --cap-drop ALL --cap-add SYS_CHROOT --cap-add DAC_OVERRIDE --cap-add KILL -v /:/host:ro -v /etc/nginx:/host/etc/nginx:rw -v /var/log/nginx:/host/var/log/nginx:rw -v /run/nginx.pid:/host/run/nginx.pid:rw -v "$WORK:/control:ro" -v "$BACKUP:/backup" --entrypoint node ghcr.io/tuanpham0411/th-rpi-storage:caa276f27da7c21bfc07a7f42e6c9513efe21e4e /control/install.mjs install
           curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --max-time 15 -H 'Host: ticket.th.io.vn' http://127.0.0.1/api/health
           curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --max-time 15 https://ticket.th.io.vn/api/health
           curl -fsS --max-time 15 https://ticket.th.io.vn/ | python3 -c 'import sys; assert "<title>TH.Ticket</title>" in sys.stdin.read(); print("Public Ticket content verified")'
