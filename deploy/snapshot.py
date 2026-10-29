@@ -18,6 +18,9 @@ def broker(path,value):
  finally:connection.close()
 files={};paths=[pathlib.Path('/etc/hostname'),pathlib.Path('/etc/hosts'),pathlib.Path('/etc/nginx/nginx.conf'),pathlib.Path('/etc/systemd/system/cloudflared.service')]
 paths+=list(pathlib.Path('/etc/nginx/sites-available').glob('*'))
+paths+=[pathlib.Path('/etc/systemd/system/th-server-console.service'),home/'state/console-deployment.json']
+console=pathlib.Path('/opt/th-server-console/current')
+if console.is_dir():paths+=[console/'console.py',console/'th-server-console.service']
 paths+=list((home/'config').glob('*.json'))+list((home/'apps').glob('*.env'))
 for app in ['ai-agent','portfolio','ticket']:
  paths+=[pathlib.Path.home()/'apps'/app/name for name in ['.env','compose.yaml','storage.compose.yaml','database-init.sh']]
