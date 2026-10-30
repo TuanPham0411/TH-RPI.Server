@@ -1,0 +1,30 @@
+name: Diagnose Studio storage availability
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/studio-storage-diagnostic.yml']
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [self-hosted, Linux, ARM64]
+    timeout-minutes: 3
+    steps:
+      - name: Read bounded storage and application status
+        run: |
+          set -eu
+          test '${{ runner.name }}' = th-server
+          docker ps -a --format '{{.Names}} {{.Status}}' --filter label=com.docker.compose.project=ai-agent
+          docker ps -a --format '{{.Names}} {{.Status}}' --filter label=com.docker.compose.service=storage
+          python3 - <<'PY'
+          import subprocess,json,re
+          ids=subprocess.check_output(['docker','ps','-aq','--filter','label=com.docker.compose.service=storage'],text=True).split()
+          for cid in ids:
+              info=json.loads(subprocess.check_output(['docker','inspect',cid],text=True))[0]
+              print(json.dumps({'storageState':info['State']['Status'],'oomKilled':info['State']['OOMKilled'],'restartCount':info['RestartCount'],'startedAt':info['State']['StartedAt']}))
+              logs=subprocess.run(['docker','logs','--tail','100',cid],text=True,capture_output=True,timeout=10)
+              text=logs.stdout+logs.stderr
+              patterns=['TH storage ready','Storage operation failed','invalid_grant','ETIMEDOUT','EHOSTUNREACH','ENOTFOUND','ECONNRESET','heap out of memory','Quota','quota','403','429','500','503','fetch failed']
+              print(json.dumps({'logSignals':{p:text.count(p) for p in patterns if p in text}}))
+              code="""import http from 'node:http';import{readFile}from'node:fs/promises';const c=JSON.parse(await readFile('/config/runtime.json','utf8'));for(const path of ['/v1/status','/v1/history'])await new Promise(resolve=>{const q=http.request({socketPath:'/run/th-storage/storage.sock',path,method:'POST',headers:{Authorization:'Bearer '+c.tokens['ai-agent'],'X-TH-Application':'ai-agent','Content-Type':'application/json'},timeout:15000},r=>{let s='';r.on('data',x=>s+=x);r.on('end',()=>{let d={};try{d=JSON.parse(s)}catch{}console.log(JSON.stringify({path,status:r.statusCode,connected:d.connected,historyCount:d.history?.length,errorClass:typeof d.error==='string'?'broker-rejected':null}));resolve()})});q.on('error',e=>{console.log(JSON.stringify({path,errorCode:e.code||'request-failed'}));resolve()});q.on('timeout',()=>q.destroy(Object.assign(Error('timeout'),{code:'TIMEOUT'})));q.end('{}')});"""
+              subprocess.run(['docker','exec',cid,'node','--input-type=module','-e',code],check=False,timeout=40)
+          PY
