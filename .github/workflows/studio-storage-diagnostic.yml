@@ -28,3 +28,10 @@ jobs:
               code="""import http from 'node:http';import{readFile}from'node:fs/promises';const c=JSON.parse(await readFile('/config/runtime.json','utf8'));for(const path of ['/v1/status','/v1/history'])await new Promise(resolve=>{const q=http.request({socketPath:'/run/th-storage/storage.sock',path,method:'POST',headers:{Authorization:'Bearer '+c.tokens['ai-agent'],'X-TH-Application':'ai-agent','Content-Type':'application/json'},timeout:15000},r=>{let s='';r.on('data',x=>s+=x);r.on('end',()=>{let d={};try{d=JSON.parse(s)}catch{}console.log(JSON.stringify({path,status:r.statusCode,connected:d.connected,historyCount:d.history?.length,errorClass:typeof d.error==='string'?'broker-rejected':null}));resolve()})});q.on('error',e=>{console.log(JSON.stringify({path,errorCode:e.code||'request-failed'}));resolve()});q.on('timeout',()=>q.destroy(Object.assign(Error('timeout'),{code:'TIMEOUT'})));q.end('{}')});"""
               subprocess.run(['docker','exec',cid,'node','--input-type=module','-e',code],check=False,timeout=40)
           PY
+      - name: Compare host and storage HTTPS connectivity
+        run: |
+          for url in https://www.googleapis.com/drive/v3/files https://oauth2.googleapis.com/token; do
+            curl --silent --show-error --max-time 15 --output /dev/null --write-out 'Host HTTP %{http_code}\n' "$url" || true
+          done
+          cid="$(docker ps -q --filter label=com.docker.compose.service=storage | head -1)"
+          docker exec "$cid" node --input-type=module -e 'import https from "node:https";import dns from "node:dns";dns.lookup("www.googleapis.com",{all:true},(e,a)=>console.log(JSON.stringify({dnsError:e?.code,addresses:a})));await Promise.all(["https://www.googleapis.com/drive/v3/files","https://oauth2.googleapis.com/token"].map(url=>new Promise(resolve=>{const q=https.get(url,{timeout:15000},r=>{console.log(JSON.stringify({url,status:r.statusCode}));r.resume();r.on("end",resolve)});q.on("error",e=>{console.log(JSON.stringify({url,error:e.code}));resolve()});q.on("timeout",()=>q.destroy(Object.assign(Error("timeout"),{code:"TIMEOUT"})))})));'
