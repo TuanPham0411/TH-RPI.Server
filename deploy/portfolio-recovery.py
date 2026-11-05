@@ -296,6 +296,7 @@ def restore_portfolio(source, operator_image):
                    '--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE','--cap-add','CHOWN','--cap-add','FOWNER',
                    '--mount','type=bind,src=/,dst=/host,readonly',
                    '--mount','type=bind,src=/etc/nginx/sites-enabled,dst=/host/etc/nginx/sites-enabled',
+                   '--tmpfs','/host/run:rw,nosuid,nodev,noexec,size=16m',
                    '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
                    '--mount','type=bind,src=/run/dbus,dst=/host/run/dbus,readonly',
                    '--tmpfs','/host/var/log/nginx:rw,nosuid,nodev,noexec,size=16m',
