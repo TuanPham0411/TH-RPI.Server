@@ -37,8 +37,8 @@ class UnixConnection(http.client.HTTPConnection):
         self.sock.connect(str(HOME / 'run/storage.sock'))
 
 
-def broker(config, application, path, value):
-    connection = UnixConnection('localhost', timeout=300)
+def broker(config, application, path, value, timeout=300):
+    connection = UnixConnection('localhost', timeout=timeout)
     try:
         connection.request('POST', path, body=json.dumps(value).encode(), headers={
             'Content-Type': 'application/json', 'Authorization': 'Bearer ' + config['tokens'][application],
@@ -79,7 +79,7 @@ def inspect_storage(source):
     print(json.dumps({'phase':'storage-readiness'}),flush=True)
     for attempt in range(300):
         try:
-            portfolio_history = broker(config, 'portfolio', '/v1/history', {})['history']
+            broker(config, 'portfolio', '/v1/status', {}, timeout=5)
             break
         except (OSError, RuntimeError, ValueError):
             if attempt and attempt%10==0:
@@ -91,6 +91,7 @@ def inspect_storage(source):
             if attempt == 299:
                 raise RuntimeError('Drive broker did not become ready. Check retained OAuth authorization; no Portfolio database or site was published.')
             time.sleep(2)
+    portfolio_history = broker(config, 'portfolio', '/v1/history', {})['history']
     if not portfolio_history:
         raise RuntimeError('Portfolio has no Drive history; refusing an empty replacement')
     print(json.dumps({'phase':'schema-snapshot','portfolioOperations':len(portfolio_history)}),flush=True)
