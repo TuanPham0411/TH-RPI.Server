@@ -2,6 +2,7 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -31,6 +32,17 @@ class RecoveryTests(unittest.TestCase):
                 r.inspect_storage(home)
             self.assertEqual(calls[0],('portfolio','/v1/status',{'timeout':5}))
             self.assertTrue((home/'state/portfolio-recovery/definition.json').is_file())
+
+    def test_temporary_postgres_server_does_not_satisfy_tcp_readiness(self):
+        attempts=[subprocess.CompletedProcess([],2,b'',b'temporary server stopping'),subprocess.CompletedProcess([],0,b'1\n',b'')]
+        with patch.object(r.subprocess,'run',side_effect=attempts) as probe,patch.object(r.time,'sleep') as sleep:
+            r.wait_for_database('fixture-only-password')
+        self.assertEqual(probe.call_count,2)
+        arguments=probe.call_args_list[0].args[0]
+        self.assertIn('127.0.0.1',arguments)
+        self.assertNotIn('fixture-only-password',' '.join(arguments))
+        self.assertEqual(probe.call_args_list[0].kwargs['env']['PGPASSWORD'],'fixture-only-password')
+        sleep.assert_called_once_with(2)
 
     def test_existing_database_is_rejected_before_any_restore(self):
         with self.assertRaisesRegex(RuntimeError,'not empty'):

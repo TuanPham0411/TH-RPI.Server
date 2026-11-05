@@ -147,6 +147,19 @@ def validate_restored_counts(query):
     return result
 
 
+def wait_for_database(password):
+    database_environment={**os.environ,'PGPASSWORD':password}
+    for attempt in range(60):
+        # Docker's initdb temporary server accepts Unix connections before it
+        # shuts down. TCP is available only on the final PostgreSQL process.
+        probe=subprocess.run(['docker','exec','-e','PGPASSWORD','portfolio-database-1',
+                              'psql','-X','-h','127.0.0.1','-U','postgres','-d','th_portfolio',
+                              '-Atc','SELECT 1'],env=database_environment,capture_output=True)
+        if probe.returncode==0 and probe.stdout.strip()==b'1':break
+        time.sleep(2)
+    else:raise RuntimeError('Recovery database did not accept an authenticated TCP connection')
+
+
 def restore_portfolio(source):
     config=json.loads((HOME/'config/runtime.json').read_text())
     definition=json.loads((HOME/'state/portfolio-recovery/definition.json').read_text())
@@ -171,19 +184,16 @@ def restore_portfolio(source):
     recovery_env=release/'recovery.env'
     recovery_env.write_text('IMAGE_TAG='+tag+'\nTH_STORAGE_TOKEN='+config['tokens']['portfolio']+'\nTH_STORAGE_RUN_DIR='+str(HOME/'run')+'\n')
     recovery_env.chmod(0o600)
-    command=['docker','compose','-p','portfolio','--env-file',str(environment),'--env-file',str(recovery_env),'-f',str(release/'compose.yaml'),'-f',str(release/'storage.compose.yaml')]
+    startup_health=release/'startup-health.compose.yaml'
+    startup_health.write_text('services:\n  database:\n    healthcheck:\n      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U postgres -d th_portfolio]\n')
+    command=['docker','compose','-p','portfolio','--env-file',str(environment),'--env-file',str(recovery_env),'-f',str(release/'compose.yaml'),'-f',str(release/'storage.compose.yaml'),'-f',str(startup_health)]
     print(json.dumps({'phase':'portfolio-image','release':tag}),flush=True)
     run(command+['pull'])
     guard=HOME/'run/maintenance-portfolio'
     guard.write_text('Portfolio recovery in progress\n')
     run(command+['stop','portfolio'])
     run(command+['up','-d','--no-build','database'])
-    for attempt in range(60):
-        try:
-            if run(['docker','inspect','--format','{{.State.Health.Status}}','portfolio-database-1']).strip()==b'healthy':break
-        except RuntimeError:pass
-        time.sleep(2)
-    else:raise RuntimeError('Recovery database did not become healthy')
+    wait_for_database(values['POSTGRES_PASSWORD'])
     def query(sql):
         return run(['docker','exec','-i','portfolio-database-1','psql','-X','-v','ON_ERROR_STOP=1','-U','postgres','-d','th_portfolio','-At'],input=sql.encode())
     progress=HOME/'state/portfolio-recovery/progress.json'
@@ -231,7 +241,7 @@ def restore_portfolio(source):
     helper_image='ghcr.io/tuanpham0411/th-rpi-console:99a1c43518ac4f70165771c7ecb07c60268c8d11'
     run(['docker','pull',helper_image])
     route_command=['docker','run','--rm','--network','none','--pid','host','--user','0',
-                   '--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE',
+                   '--cap-drop','ALL','--cap-add','SYS_CHROOT','--cap-add','DAC_OVERRIDE','--cap-add','CHOWN','--cap-add','FOWNER',
                    '--mount','type=bind,src=/,dst=/host,readonly',
                    '--mount','type=bind,src=/etc/nginx/sites-enabled,dst=/host/etc/nginx/sites-enabled',
                    '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
