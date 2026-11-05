@@ -50,14 +50,26 @@ jobs:
       - name: Diagnose Portfolio OAuth without account or credential values
         run: |
           python3 - <<'PY'
-          import subprocess,re,json
+          import subprocess,re,json,collections
           for container in ['portfolio-portfolio-1','th-platform-storage-1']:
               result=subprocess.run(['docker','logs','--since','2h','--tail','300',container],capture_output=True,text=True)
               text=result.stdout+result.stderr
-              codes=re.findall(r"Portfolio request failed.*?code: ['\"]([A-Za-z0-9_]+)",text)
+              codes=re.findall(r"Portfolio request failed.*?code: ['\"]([A-Za-z0-9_-]+)",text)
               reasons=[value for value in ['Drive OAuth refresh failed','Drive and PostgreSQL differ','Missing or corrupt event','Multiple Drive writers','permission denied','fetch failed','Drive request failed','projection differs'] if value.lower() in text.lower()]
-              print(json.dumps({'container':container,'errorCodes':codes[-20:],'recognizedReasons':reasons}))
+              print(json.dumps({'container':container,'errorCodes':dict(collections.Counter(codes)),'driveHttpStatuses':re.findall(r'Drive request failed \((\d+)\)',text)[-20:],'recognizedReasons':reasons}))
           sql="SELECT json_build_object('pgcrypto',(SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='pgcrypto'),'crypt',to_regprocedure('extensions.crypt(text,text)') IS NOT NULL,'genSalt',to_regprocedure('extensions.gen_salt(text,integer)') IS NOT NULL,'schemaUsage',has_schema_privilege('th_api','extensions','USAGE'),'cryptExecute',CASE WHEN to_regprocedure('extensions.crypt(text,text)') IS NULL THEN false ELSE has_function_privilege('th_api','extensions.crypt(text,text)','EXECUTE') END,'head',public.th_storage_head())"
           result=subprocess.run(['docker','exec','-i','portfolio-database-1','psql','-X','-U','postgres','-d','th_portfolio','-At','-v','ON_ERROR_STOP=1'],input=sql,text=True,capture_output=True)
           print(result.stdout if result.returncode==0 else json.dumps({'databaseDiagnosticFailed':True}))
           PY
+          docker exec -i th-platform-storage-1 node --input-type=module <<'JS'
+          import {readFile} from 'node:fs/promises';
+          import {tokenSupplier} from './storage/oauth.mjs';
+          try {
+            const config=JSON.parse(await readFile('/config/runtime.json','utf8'));
+            const token=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
+            const root=JSON.parse(await readFile('/state/drive-root.json','utf8'));
+            const response=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(root.folderId)+'?fields=id',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
+            const result=await response.json();
+            console.log(JSON.stringify({driveRootStatus:response.status,reasons:(result.error?.errors||[]).map(x=>x.reason)}));
+          } catch(error) { console.log(JSON.stringify({driveProbeFailed:true,type:error.name})); }
+          JS
