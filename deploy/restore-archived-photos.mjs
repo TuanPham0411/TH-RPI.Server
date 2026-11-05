@@ -1,10 +1,25 @@
 import {readFile,lstat} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
 import {tokenSupplier} from '../storage/oauth.mjs';
 import {GoogleDriveTransport} from '../storage/google-drive.mjs';
 import {Coordinator} from '../storage/coordinator.mjs';
 import {verifiedDownloader} from './recovery-files.mjs';
 
+export async function readArchivedFile(transport,file){
+  try{return await transport.request('files/'+encodeURIComponent(file.id)+'?alt=media');}
+  catch(error){
+   if(!String(error.message).includes('Drive request failed (404)'))throw error;
+   // Drive IDs can become stale after an archive copy. The authenticated,
+   // content-addressed key plus SHA-256 still identifies the same bytes.
+   if(typeof file.key!=='string'||!file.key.startsWith('portfolio/')||!file.key.endsWith('/'+file.sha256))throw error;
+   const current=await transport.metadata(file.key);
+   if(!current.file)throw error;
+   return transport.request('files/'+encodeURIComponent(current.file.id)+'?alt=media');
+  }
+ }
+
+async function main(){
 let phase='initialization';
 try{
  const input=JSON.parse(readFileSync(0,'utf8'));
@@ -30,18 +45,7 @@ try{
  let restored=0,reused=0;
  phase='restore-verified-files';
  console.log(JSON.stringify({archiveMatches:references.size}));
- const download=verifiedDownloader({root:'/cache/files',fetchReference:async file=>{
-  try{return await transport.request('files/'+encodeURIComponent(file.id)+'?alt=media');}
-  catch(error){
-   if(!String(error.message).includes('Drive request failed (404)'))throw error;
-   // Drive IDs can become stale after an archive copy. The authenticated,
-   // content-addressed key plus SHA-256 still identifies the same bytes.
-   if(typeof file.key!=='string'||!file.key.startsWith('portfolio/')||!file.key.endsWith('/'+file.sha256))throw error;
-   const current=await transport.metadata(file.key);
-   if(!current.file)throw error;
-   return transport.request('files/'+encodeURIComponent(current.file.id)+'?alt=media');
-  }
- },onFile:result=>{if(result.reused)reused++;else restored++;}});
+ const download=verifiedDownloader({root:'/cache/files',fetchReference:file=>readArchivedFile(transport,file),onFile:result=>{if(result.reused)reused++;else restored++;}});
  let unavailable=0;
  for(const file of references.values()){
   try{await download(file);}
@@ -56,3 +60,6 @@ try{
  console.error(JSON.stringify({archiveRecoveryFailed:true,phase,code:error.code||null,reason:known.find(value=>String(error.message).includes(value))||null,providerStatus:provider?.[1]||null,providerReason:provider?.[2]||null}));
  process.exitCode=1;
 }
+
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)await main();
