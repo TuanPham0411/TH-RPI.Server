@@ -12,6 +12,26 @@ n=importlib.util.module_from_spec(spec2);spec2.loader.exec_module(n)
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_readiness_uses_cheap_status_before_reading_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home=pathlib.Path(directory)
+            (home/'config').mkdir();(home/'state').mkdir()
+            (home/'config/runtime.json').write_text(json.dumps({'tokens':{'portfolio':'fixture','server':'fixture'}}))
+            (home/'config/drive-credentials.json').write_text('{}')
+            (home/'state/deployment.json').write_text(json.dumps({'imageTag':'a'*40}))
+            (home/'compose.yaml').write_text('services: {}')
+            calls=[]
+            definition={'release':'b'*40,'schema':'fixture','migrations':[]}
+            def request(config,app,path,value,**options):
+                calls.append((app,path,options))
+                if path=='/v1/status':return {'connected':True}
+                if path=='/v1/history':return {'history':[{'id':'fixture-head'}]}
+                return {'events':[{'table':'credentials','new':json.dumps({'kind':'server-configuration','databases':{'portfolio':definition}})}]}
+            with patch.object(r,'HOME',home),patch.object(r,'run',return_value=b''),patch.object(r,'broker',side_effect=request):
+                r.inspect_storage(home)
+            self.assertEqual(calls[0],('portfolio','/v1/status',{'timeout':5}))
+            self.assertTrue((home/'state/portfolio-recovery/definition.json').is_file())
+
     def test_existing_database_is_rejected_before_any_restore(self):
         with self.assertRaisesRegex(RuntimeError,'not empty'):
             r.assert_empty_database(lambda sql:b'7\n')
