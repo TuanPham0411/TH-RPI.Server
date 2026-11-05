@@ -1,0 +1,65 @@
+name: Warm and verify GoT display cache
+on:
+  workflow_dispatch:
+    inputs:
+      per_topic:
+        description: Number of initial cards to warm in each topic (1 to 1200)
+        type: number
+        default: 12
+permissions: {contents: read}
+concurrency: {group: got-th-server-1, cancel-in-progress: false}
+jobs:
+  cache:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 90
+    steps:
+      - name: Warm derived display copies through the running application
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+          PER_TOPIC: ${{ inputs.per_topic }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          docker exec -i -e PER_TOPIC="$PER_TOPIC" th-got-web-1 python -u - <<'PY'
+          import json,os,time
+          from urllib.request import urlopen,Request
+          from pathlib import Path
+          from app import app
+          from drive_store import store
+          limit=int(os.environ['PER_TOPIC'])
+          assert 1<=limit<=1200
+          origin='http://127.0.0.1:5000'
+          def get(path,headers=None):
+              with urlopen(Request(origin+path,headers=headers or {}),timeout=90) as r:
+                  return r.status,r.headers,r.read()
+          assert json.loads(get('/readyz')[2])['ok']
+          data=json.loads(get('/api/bootstrap')[2]);paths=['/static/images/intro/learning-garden.png']
+          for topic in data['topics']:
+              items=json.loads(get('/api/topic/'+topic['id'])[2]).get('items',[])
+              paths.extend('/thumb/'+item['image'] for item in items[:limit] if item.get('image'))
+          scenes=json.loads(get('/resource/hidden-scenes-v87.json')[2]).get('scenes',[])
+          paths.extend(s['image'] for s in scenes if str(s.get('image','')).startswith('/resource/images/'))
+          paths=list(dict.fromkeys(paths));started=time.monotonic();verified=0;errors=[]
+          for index,path in enumerate(paths):
+              try:
+                  status,headers,body=get(path)
+                  assert status==200 and headers.get('ETag') and len(body)>20
+                  assert headers.get('X-Resource-Cache') in ('hit','miss')
+                  assert headers.get_content_type().startswith('image/')
+                  again=get(path)
+                  assert again[1].get('X-Resource-Cache')=='hit' and again[2]==body
+                  verified+=1
+              except Exception as error:
+                  errors.append({'path':path,'type':type(error).__name__})
+              if (index+1)%25==0:print(json.dumps({'processed':index+1,'total':len(paths),'verified':verified,'failures':len(errors)}),flush=True)
+          with app.app_context():status=store().view_cache.status()
+          size=sum(p.stat().st_size for p in Path('/data/display-cache').rglob('*.blob'))
+          print(json.dumps({'verified':verified,'total':len(paths),'seconds':round(time.monotonic()-started),'displayBytes':size,'indexedResources':status['indexedResources'],'errors':errors[:10]},ensure_ascii=False))
+          assert not errors
+          assert size<=status['maxBytes']+16*1024*1024
+          PY
+      - name: Verify existing applications and host services
+        if: always()
+        run: |
+          systemctl is-active th-server-monitor.service th-server-console.service ssh NetworkManager tailscaled cloudflared nginx
+          curl --fail --silent --show-error --max-time 20 https://th.io.vn/api/health
+          curl --fail --silent --show-error --max-time 20 https://esp.th.io.vn/healthz
