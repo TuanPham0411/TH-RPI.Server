@@ -73,8 +73,10 @@ def inspect_storage(source):
     image_env.write_text('IMAGE_TAG=' + image_tag + '\nTH_PLATFORM_HOME=' + str(HOME) + '\n')
     image_env.chmod(0o600)
     command = ['docker', 'compose', '-p', 'th-platform', '--env-file', str(image_env), '-f', str(compose)]
+    print(json.dumps({'phase':'storage-image','release':image_tag}),flush=True)
     run(command + ['pull'])
     run(command + ['up', '-d', '--no-build'])
+    print(json.dumps({'phase':'storage-readiness'}),flush=True)
     for attempt in range(300):
         try:
             portfolio_history = broker(config, 'portfolio', '/v1/history', {})['history']
@@ -91,6 +93,7 @@ def inspect_storage(source):
             time.sleep(2)
     if not portfolio_history:
         raise RuntimeError('Portfolio has no Drive history; refusing an empty replacement')
+    print(json.dumps({'phase':'schema-snapshot','portfolioOperations':len(portfolio_history)}),flush=True)
     server_history = broker(config, 'server', '/v1/history', {})['history']
     definition = None
     for marker in reversed(server_history):
@@ -163,6 +166,7 @@ def restore_portfolio(source):
     recovery_env.write_text('IMAGE_TAG='+tag+'\nTH_STORAGE_TOKEN='+config['tokens']['portfolio']+'\nTH_STORAGE_RUN_DIR='+str(HOME/'run')+'\n')
     recovery_env.chmod(0o600)
     command=['docker','compose','-p','portfolio','--env-file',str(environment),'--env-file',str(recovery_env),'-f',str(release/'compose.yaml'),'-f',str(release/'storage.compose.yaml')]
+    print(json.dumps({'phase':'portfolio-image','release':tag}),flush=True)
     run(command+['pull'])
     guard=HOME/'run/maintenance-portfolio'
     guard.write_text('Portfolio recovery in progress\n')
@@ -181,11 +185,13 @@ def restore_portfolio(source):
     if previous.get('restored') and previous.get('release')!=tag:raise RuntimeError('Recovery progress belongs to a different release')
     if not previous.get('restored'):
         assert_empty_database(query)
+        print(json.dumps({'phase':'schema-restore'}),flush=True)
         query(definition['schema'])
         for catalog in definition['migrations']:query(catalog)
         query('INSERT INTO th_storage.head(id,operation,enforced) VALUES(true,null,false)')
         image='ghcr.io/tuanpham0411/th-portfolio-app:'+tag
         run(['docker','run','--rm','--network','none','--user','0','--mount','type=volume,src=portfolio_media,dst=/data',image,'node','-e',"const fs=require('node:fs');fs.mkdirSync('/data/files',{recursive:true});fs.chownSync('/data',1000,1000);fs.chownSync('/data/files',1000,1000)"])
+        print(json.dumps({'phase':'records-and-media-restore'}),flush=True)
         run(command+['run','--rm','--no-deps','-v','portfolio_media:/data','-e','FILES_ROOT=/data/files','migrate','node','dist/server/storage-operator.cjs','restore-empty'])
         counts=validate_restored_counts(query)
         restored_head=query('SELECT public.th_storage_head()').strip().decode()
@@ -224,9 +230,12 @@ def restore_portfolio(source):
                    '--mount','type=bind,src=/etc/nginx/sites-enabled,dst=/host/etc/nginx/sites-enabled',
                    '--mount','type=bind,src=/run/systemd,dst=/host/run/systemd',
                    '--mount','type=bind,src=/run/dbus,dst=/host/run/dbus,readonly',
+                   '--tmpfs','/host/var/log/nginx:rw,nosuid,nodev,noexec,size=16m',
+                   '--tmpfs','/host/var/lib/nginx:rw,nosuid,nodev,noexec,size=16m',
                    '--mount','type=bind,src='+str(source/'deploy/portfolio-nginx.py')+',dst=/control/portfolio-nginx.py,readonly',
                    '--mount','type=bind,src='+str(route_backup)+',dst=/backup',
                    helper_image,'python3','/control/portfolio-nginx.py']
+    print(json.dumps({'phase':'public-route'}),flush=True)
     run(route_command)
     try:
         with urllib.request.urlopen('https://th.io.vn/api/health',timeout=30) as response:

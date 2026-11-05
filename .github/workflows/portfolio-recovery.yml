@@ -45,3 +45,19 @@ jobs:
       - name: Verify management and access services
         run: |
           systemctl is-active th-server-monitor.service th-server-console.service ssh NetworkManager tailscaled cloudflared nginx
+      - name: Safe recovery diagnostics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,re,subprocess
+          result=subprocess.run(['docker','inspect','--format','{{json .State.Status}} {{.RestartCount}}','th-platform-storage-1'],capture_output=True,text=True)
+          print(json.dumps({'brokerState':result.stdout.strip() if result.returncode==0 else 'unavailable'}))
+          logs=subprocess.run(['docker','logs','--tail','60','th-platform-storage-1'],capture_output=True,text=True)
+          text=logs.stdout+'\n'+logs.stderr
+          patterns=[r'Drive OAuth refresh failed \(\d+\)',r'Drive request failed \(\d+\)',r'Drive owner or offline grant differs',r'Authenticated Drive owner differs',r'Missing or corrupt event',r'Unsupported state or unable to authenticate data',r'JavaScript heap out of memory']
+          reasons=sorted(set(match.group(0) for pattern in patterns for match in re.finditer(pattern,text)))
+          print(json.dumps({'recognizedBrokerErrors':reasons}))
+          state=pathlib.Path.home()/'th-platform/state/portfolio-recovery'
+          for name in ('definition.json','progress.json','last-command-error.log'):
+              print(json.dumps({'privateRecoveryFile':name,'exists':(state/name).is_file()}))
+          PY
