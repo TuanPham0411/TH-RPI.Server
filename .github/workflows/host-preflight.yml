@@ -7,6 +7,22 @@ jobs:
     runs-on: [th-server-bootstrap]
     timeout-minutes: 5
     steps:
+      - name: Diagnose tunnel availability without token or credential output
+        run: |
+          python3 - <<'PY'
+          import subprocess,json,re
+          commands=[['systemctl','show','cloudflared','-p','ActiveState','-p','SubState','-p','Result','-p','NRestarts','-p','ExecMainStatus','-p','MemoryCurrent'],['free','-m'],['uptime']]
+          for command in commands:
+              result=subprocess.run(command,capture_output=True,text=True);print(result.stdout)
+          result=subprocess.run(['journalctl','-u','cloudflared','--since','30 minutes ago','--no-pager','-o','cat'],capture_output=True,text=True)
+          text=result.stdout+result.stderr
+          patterns=['Registered tunnel connection','Unregistered tunnel connection','Unable to establish connection','failed to dial','timeout','connection refused','no route to host','network is unreachable','Failed to serve tunnel','authentication','Unauthorized','permission denied','QUIC','http2','out of memory']
+          print(json.dumps({'tunnelLogPatterns':{p:len(re.findall(re.escape(p),text,re.I)) for p in patterns},'journalReadable':'not seeing messages' not in text.lower()}))
+          for port in ('8080','5081','5082'):
+              path='/api/health' if port=='8080' else '/healthz'
+              result=subprocess.run(['curl','--silent','--max-time','5','-o','/dev/null','-w','%{http_code}','http://127.0.0.1:'+port+path],capture_output=True,text=True)
+              print(json.dumps({'localPort':port,'healthStatus':result.stdout}))
+          PY
       - name: Inspect deployment prerequisites without exposing values
         env:
           SELECTED_RUNNER: ${{ runner.name }}
