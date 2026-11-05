@@ -23,8 +23,8 @@ def inspect():
             print(json.dumps({'environment': str(path), 'setNames': sorted(set(names))}))
     site = pathlib.Path('/etc/nginx/sites-available/esp.th.io.vn')
     if site.is_file():
-        routing = [line.strip() for line in site.read_text().splitlines() if line.strip().startswith(('listen ', 'server_name ', 'proxy_pass '))]
-        print(json.dumps({'nginxRouting': routing}))
+        code = "import pathlib,json;print(json.dumps({'nginxRouting':[s.strip() for s in pathlib.Path('/site').read_text().splitlines() if s.strip().startswith(('listen ','server_name ','proxy_pass '))]}))"
+        subprocess.run(['docker','run','--rm','--network','none','--read-only','--user','0','--cap-drop','ALL','--cap-add','DAC_OVERRIDE','--mount','type=bind,src='+str(site)+',dst=/site,readonly','ghcr.io/tuanpham0411/th-rpi-console:99a1c43518ac4f70165771c7ecb07c60268c8d11','python3','-c',code],check=True)
     for command in [['docker','ps','-a','--format','{{.Names}} {{.Image}} {{.Status}}'], ['docker','volume','ls','--format','{{.Name}}'], ['systemctl','is-active','th-server-monitor.service','th-server-console.service','ssh','nginx','cloudflared']]:
         subprocess.run(command, check=True)
 
