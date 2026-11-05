@@ -31,3 +31,11 @@ containers and databases are not deployed. The previous automatic in-place broke
 upgrade is now manual to prevent a competing Ticket-dependent deployment during
 fresh recovery. SSH, networking, monitor and HDMI services are preserved and
 checked after the recovery job.
+
+If the retained broker release has a slow cold start, `broker_release` can select a
+newly tested/published immutable TH-RPI.Server image. The old deployment metadata
+is kept until the replacement broker authenticates and the recovery schema is
+verified. Log descriptor snapshots and bounded parallel reads reduce repeated
+Drive metadata calls; startup cache replay remains ordered, verifies every event
+checksum/decryption and checkpoints once per application instead of rewriting the
+whole mapping file after every historical operation.

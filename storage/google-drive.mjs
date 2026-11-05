@@ -6,7 +6,7 @@ import {createReadStream} from 'node:fs';
 export class GoogleDriveTransport {
   constructor({rootId, accessToken, fetchImpl = fetch}) {
     if (!/^[\w-]+$/.test(rootId) || typeof accessToken !== 'function') throw Error('Drive connection required');
-    this.rootId = rootId; this.accessToken = accessToken; this.fetch = fetchImpl;
+    this.rootId = rootId; this.accessToken = accessToken; this.fetch = fetchImpl; this.readIndex = new Map();
   }
   async request(path, init = {}, upload = false) {
     const token = await this.accessToken();
@@ -58,7 +58,8 @@ export class GoogleDriveTransport {
     return {parent, name, file: matches[0] || null};
   }
   async get(key) {
-    const {file} = await this.metadata(key);
+    this.parts(key);
+    const file = this.readIndex.get(key) || (await this.metadata(key)).file;
     if (!file) return null;
     if (file.mimeType === 'application/vnd.google-apps.folder') throw Error('Expected file');
     return Buffer.from(await (await this.request(`files/${file.id}?alt=media`)).arrayBuffer());
@@ -67,7 +68,7 @@ export class GoogleDriveTransport {
     const {parent, name, file} = await this.metadata(key, true);
     if (file) {
       // Remote comparison makes retry safe after server/cache loss.
-      const existing = await this.get(key);
+      const existing = Buffer.from(await (await this.request(`files/${file.id}?alt=media`)).arrayBuffer());
       if (!existing.equals(bytes)) throw Error('Immutable Drive object conflict');
       return;
     }
@@ -89,15 +90,24 @@ export class GoogleDriveTransport {
   }
   async list(prefix) {
     if (!prefix.endsWith('/')) throw Error('Folder prefix required');
+    // Each listing is fresh. Keep only descriptors from its exact snapshot so
+    // verified log reads need one content request, not repeated folder lookups.
+    for (const key of this.readIndex.keys()) if (key.startsWith(prefix)) this.readIndex.delete(key);
     const parent = await this.resolve(this.parts(prefix.slice(0, -1)));
     if (!parent) return [];
-    const children = await this.children(parent);
-    return children.map(file => {
+    const children = await this.children(parent), found = new Map();
+    for (const file of children) {
       if (file.mimeType === 'application/vnd.google-apps.folder') throw Error('Unexpected directory in commit log');
       this.parts(file.name);
-      return prefix + file.name;
-    });
+      const key = prefix + file.name;
+      if (found.has(key)) throw Error('Duplicate Drive object; reconcile before continuing');
+      found.set(key, file);
+    }
+    for (const [key, file] of found) this.readIndex.set(key, file);
+    return [...found.keys()];
   }
+  estimatedSize(key) { return Number(this.readIndex.get(key)?.size) || 8 * 1024 * 1024; }
+
   async putLocalFile(key,path,{type,size,sha256,md5}) {
     const {parent,name,file}=await this.metadata(key,true);
     if(file){if(Number(file.size)!==size||file.md5Checksum!==md5)throw Error('Drive media checksum differs');return {id:file.id,key,size,sha256,md5,type};}

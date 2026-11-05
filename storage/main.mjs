@@ -7,18 +7,22 @@ import {storageServer} from './http.mjs';
 import {Photos} from './photos.mjs';
 import {OwnerAuth} from './owner-auth.mjs';
 import {randomUUID} from 'node:crypto';
+import {replayHistory} from './replay.mjs';
 const config=JSON.parse(await readFile(process.env.TH_STORAGE_CONFIG||'/config/runtime.json','utf8'));
 const token=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
 const rootId=await ensureRoot(token);
 const transport=new GoogleDriveTransport({rootId,accessToken:token});
 await mkdir('/state',{recursive:true,mode:0o700});
 const indices=new Map();
-async function updateIndex({application,events,files,marker}){
+async function updateIndex({application,events,files,marker},persist=true){
  const index=indices.get(application)||{};
  for(const event of events)if(event.action==='DELETE')for(const reference of attachmentReferences({...event,new:event.old}))delete index[reference.path];
  for(const file of files)index[file.path]=file;
  indices.set(application,index);
- await writeFile(`/state/${application}.tmp`,JSON.stringify({operation:marker.id,files:index}),{mode:0o600});
+ if(persist)await persistIndex(application,marker);
+}
+async function persistIndex(application,marker){
+ await writeFile(`/state/${application}.tmp`,JSON.stringify({operation:marker.id,files:indices.get(application)||{}}),{mode:0o600});
  await rename(`/state/${application}.tmp`,`/state/${application}.json`);
 }
 const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret,attachment:attachmentWriter(transport,{'ai-agent':'/source/ai','portfolio':'/source/portfolio/files','ticket':'/source/ticket/files'}),onCommitted:updateIndex});
@@ -27,10 +31,12 @@ const authRecords=[];
 for(const app of Object.keys(config.tokens)){
  const history=await coordinator.history(app);
  coordinator.heads.set(app,history.at(-1)?.id??null);
- for(const marker of history){
-  const packet=await coordinator.event(app,marker);await updateIndex({application:app,events:packet.events,files:packet.files,marker});
-  if(app==='server')for(const event of packet.events)if(event.table==='credentials'&&event.new){const value=JSON.parse(event.new);if(value.kind==='photos-oauth')photosCredentials=value;if(value.kind==='owner-session'||value.kind==='owner-revocation')authRecords.push(value);}
- }
+ await replayHistory({application:app,history,coordinator,transport,
+  apply:async(packet,marker)=>{
+   await updateIndex({application:app,events:packet.events,files:packet.files,marker},false);
+   if(app==='server')for(const event of packet.events)if(event.table==='credentials'&&event.new){const value=JSON.parse(event.new);if(value.kind==='photos-oauth')photosCredentials=value;if(value.kind==='owner-session'||value.kind==='owner-revocation')authRecords.push(value);}
+  },checkpoint:marker=>persistIndex(app,marker),
+  progress:completed=>console.log('Storage recovery progress',{application:app,completed,total:history.length})});
 }
 let privateQueue=Promise.resolve();
 function savePrivate(credentials){const result=privateQueue.then(async()=>{
