@@ -89,6 +89,22 @@ jobs:
           if mounts.returncode==0:
               print(json.dumps({'brokerMounts':[{'source':row['Source'],'destination':row['Destination']} for row in json.loads(mounts.stdout)]}))
           state=pathlib.Path.home()/'th-platform/state/portfolio-recovery'
+          error_file=state/'last-command-error.log'
+          if error_file.is_file():
+              text=error_file.read_text(errors='replace')
+              categories=['unauthorized','denied','manifest unknown','not found','invalid reference format','interpolat','permission','no such file','toomanyrequests','rate limit','error pulling','unable to get image','is a directory']
+              print(json.dumps({'dockerErrorCategories':[key for key in categories if key in text.lower()]}))
+              # Redact host-configured values before showing a bounded diagnostic.
+              env_path=pathlib.Path.home()/'apps/portfolio/.env'
+              values=module.read_environment(env_path) if env_path.is_file() else {}
+              for value in sorted(values.values(),key=len,reverse=True):
+                  if len(value)>=4:text=text.replace(value,'[REDACTED]')
+              text=re.sub(r'(?i)Bearer\s+[^\s]+','Bearer [REDACTED]',text)
+              text=re.sub(r'://[^/\s:@]+:[^/\s@]+@','://[REDACTED]@',text)
+              print(json.dumps({'redactedDockerError':text[-2500:]}))
+          image='ghcr.io/tuanpham0411/th-portfolio-app:be152df4054f8c88d15d2e960af4ef60f6f6c79b'
+          cached=subprocess.run(['docker','image','inspect','--format','{{json .RepoDigests}}',image],capture_output=True,text=True)
+          print(json.dumps({'cachedPortfolioImage':cached.returncode==0,'repoDigests':json.loads(cached.stdout) if cached.returncode==0 else []}))
           for name in ('definition.json','progress.json','last-command-error.log'):
               print(json.dumps({'privateRecoveryFile':name,'exists':(state/name).is_file()}))
           PY
