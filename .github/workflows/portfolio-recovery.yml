@@ -2,6 +2,10 @@ name: Recover Portfolio from retained Drive storage
 on:
   workflow_dispatch:
     inputs:
+      diagnose:
+        description: Run read-only diagnostics without reconnecting or restoring data
+        type: boolean
+        default: false
       restore:
         description: Restore existing Portfolio data and publish the verified site
         type: boolean
@@ -36,6 +40,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Reconnect storage and inspect recovery metadata
+        if: inputs.diagnose != true
         env:
           RESTORE: ${{ inputs.restore }}
         run: |
@@ -56,7 +61,18 @@ jobs:
           text=logs.stdout+'\n'+logs.stderr
           patterns=[r'Drive OAuth refresh failed \(\d+\)',r'Drive request failed \(\d+\)',r'Drive owner or offline grant differs',r'Authenticated Drive owner differs',r'Missing or corrupt event',r'Unsupported state or unable to authenticate data',r'JavaScript heap out of memory']
           reasons=sorted(set(match.group(0) for pattern in patterns for match in re.finditer(pattern,text)))
-          print(json.dumps({'recognizedBrokerErrors':reasons}))
+          print(json.dumps({'recognizedBrokerErrors':reasons,'brokerReadyLog': 'TH storage ready' in text}))
+          import importlib.util
+          spec=importlib.util.spec_from_file_location('recovery',pathlib.Path('deploy/portfolio-recovery.py'))
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          sock=module.HOME/'run/storage.sock'
+          try:
+              info=sock.stat();print(json.dumps({'socketUid':info.st_uid,'socketMode':oct(info.st_mode & 0o777),'runnerUid':__import__('os').getuid()}))
+              config=json.loads((module.HOME/'config/runtime.json').read_text())
+              value=module.broker(config,'portfolio','/v1/status',{},timeout=5)
+              print(json.dumps({'brokerStatusEndpoint':True,'connected':value.get('connected')}))
+          except Exception as error:
+              print(json.dumps({'brokerStatusEndpoint':False,'reason':str(error) if isinstance(error,RuntimeError) else type(error).__name__}))
           state=pathlib.Path.home()/'th-platform/state/portfolio-recovery'
           for name in ('definition.json','progress.json','last-command-error.log'):
               print(json.dumps({'privateRecoveryFile':name,'exists':(state/name).is_file()}))
