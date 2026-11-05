@@ -38,6 +38,9 @@ jobs:
               paths.extend('/thumb/'+item['image'] for item in items[:limit] if item.get('image'))
           scenes=json.loads(get('/resource/hidden-scenes-v87.json')[2]).get('scenes',[])
           paths.extend(s['image'] for s in scenes if str(s.get('image','')).startswith('/resource/images/'))
+          if limit>=1200:
+              inventory=json.loads(Path('/app/assets.lock.json').read_text())
+              paths.extend('/thumb/'+path.removeprefix('resource/') if path.startswith('resource/images/') else '/'+path for path in inventory['files'])
           paths=list(dict.fromkeys(paths));started=time.monotonic();verified=0;errors=[]
           for index,path in enumerate(paths):
               try:
