@@ -147,6 +147,49 @@ def validate_restored_counts(query):
     return result
 
 
+def reusable_empty_schema(query):
+    tables=int(query("SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')").strip())
+    if tables==0:return False
+    valid=query("SELECT to_regclass('portfolio.content') IS NOT NULL AND to_regclass('public.portfolio_schema_migrations') IS NOT NULL AND to_regclass('th_storage.head') IS NOT NULL").strip()
+    if valid!=b't':raise RuntimeError('Existing database is not an initialized Portfolio recovery target')
+    head=json.loads(query("SELECT json_build_object('operation',operation,'enforced',enforced) FROM th_storage.head WHERE id"))
+    if head.get('operation') is not None or head.get('enforced'):
+        raise RuntimeError('Existing database already has an acknowledged head; refusing to replay over it')
+    names=json.loads(query("SELECT coalesce(json_agg(json_build_object('schema',schemaname,'table',tablename)),'[]') FROM pg_tables WHERE schemaname IN ('public','portfolio','ticket_private','mes_private') AND tablename NOT IN ('schema_migrations','portfolio_schema_migrations','ai_schema_migrations')"))
+    for row in names:
+        schema='"'+row['schema'].replace('"','""')+'"'
+        table='"'+row['table'].replace('"','""')+'"'
+        if query('SELECT 1 FROM '+schema+'.'+table+' LIMIT 1').strip():
+            raise RuntimeError('Existing recovery database contains business rows; preserved without overwrite')
+    return True
+
+
+def stop_interrupted_restore():
+    ids=run(['docker','ps','-aq','--filter','label=com.docker.compose.project=portfolio','--filter','label=com.docker.compose.service=migrate']).decode().split()
+    for identifier in ids:
+        command=json.loads(run(['docker','inspect','--format','{{json .Config.Cmd}}',identifier]))
+        owned=('dist/server/storage-operator.cjs' in command and 'restore-empty' in command) or 'deploy/restore-portfolio.mjs' in command
+        if owned:
+            run(['docker','stop','--time','30',identifier])
+            run(['docker','rm',identifier])
+
+
+def run_recovery_operator(command):
+    error_file=HOME/'state/portfolio-recovery/last-command-error.log'
+    with open(error_file,'wb') as errors:
+        error_file.chmod(0o600)
+        process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=errors)
+        for line in process.stdout:
+            try:value=json.loads(line)
+            except ValueError:continue
+            if isinstance(value,dict):
+                safe={key:value[key] for key in ('phase','completed','total','restored','operations','reusedMedia','downloadedMedia') if key in value}
+                if safe:print(json.dumps(safe),flush=True)
+        status=process.wait()
+    if status:raise RuntimeError('Portfolio recovery operator failed; recovered files and private diagnostic retained')
+    if error_file.stat().st_size==0:error_file.unlink()
+
+
 def wait_for_database(password):
     database_environment={**os.environ,'PGPASSWORD':password}
     for attempt in range(60):
@@ -160,7 +203,8 @@ def wait_for_database(password):
     else:raise RuntimeError('Recovery database did not accept an authenticated TCP connection')
 
 
-def restore_portfolio(source):
+def restore_portfolio(source, operator_image):
+    if not operator_image or not re.fullmatch(r'ghcr\.io/tuanpham0411/th-rpi-recovery:[a-f0-9]{40}',operator_image):raise RuntimeError('A tested immutable recovery operator image is required')
     config=json.loads((HOME/'config/runtime.json').read_text())
     definition=json.loads((HOME/'state/portfolio-recovery/definition.json').read_text())
     tag=definition['release']
@@ -192,6 +236,7 @@ def restore_portfolio(source):
     guard=HOME/'run/maintenance-portfolio'
     guard.write_text('Portfolio recovery in progress\n')
     run(command+['stop','portfolio'])
+    stop_interrupted_restore()
     run(command+['up','-d','--no-build','database'])
     wait_for_database(values['POSTGRES_PASSWORD'])
     def query(sql):
@@ -200,15 +245,22 @@ def restore_portfolio(source):
     previous=json.loads(progress.read_text()) if progress.exists() else {}
     if previous.get('restored') and previous.get('release')!=tag:raise RuntimeError('Recovery progress belongs to a different release')
     if not previous.get('restored'):
-        assert_empty_database(query)
-        print(json.dumps({'phase':'schema-restore'}),flush=True)
-        query(definition['schema'])
-        for catalog in definition['migrations']:query(catalog)
-        query('INSERT INTO th_storage.head(id,operation,enforced) VALUES(true,null,false)')
+        if reusable_empty_schema(query):
+            print(json.dumps({'phase':'resume-empty-recovery-schema'}),flush=True)
+        else:
+            assert_empty_database(query)
+            print(json.dumps({'phase':'schema-restore'}),flush=True)
+            query(definition['schema'])
+            for catalog in definition['migrations']:query(catalog)
+            query('INSERT INTO th_storage.head(id,operation,enforced) VALUES(true,null,false)')
         image='ghcr.io/tuanpham0411/th-portfolio-app:'+tag
         run(['docker','run','--rm','--network','none','--user','0','--mount','type=volume,src=portfolio_media,dst=/data',image,'node','-e',"const fs=require('node:fs');fs.mkdirSync('/data/files',{recursive:true});fs.chownSync('/data',1000,1000);fs.chownSync('/data/files',1000,1000)"])
+        run(['docker','pull',operator_image])
+        operator_override=release/'recovery-operator.compose.yaml'
+        operator_override.write_text('services:\n  migrate:\n    image: '+operator_image+'\n    build: null\n')
+        operator_command=command+['-f',str(operator_override)]
         print(json.dumps({'phase':'records-and-media-restore'}),flush=True)
-        run(command+['run','--rm','--no-deps','-v','portfolio_media:/data','-e','FILES_ROOT=/data/files','migrate','node','dist/server/storage-operator.cjs','restore-empty'])
+        run_recovery_operator(operator_command+['run','--rm','--no-deps','-v','portfolio_media:/data','-v',str(HOME/'config')+':/config:ro','-e','FILES_ROOT=/data/files','migrate','node','deploy/restore-portfolio.mjs'])
         counts=validate_restored_counts(query)
         restored_head=query('SELECT public.th_storage_head()').strip().decode()
         remote_head=broker(config,'portfolio','/v1/history',{})['history'][-1]['id']
@@ -276,6 +328,7 @@ def main():
     parser.add_argument('--source', type=pathlib.Path, required=True)
     parser.add_argument('--restore', action='store_true')
     parser.add_argument('--broker-release')
+    parser.add_argument('--operator-image')
     args = parser.parse_args()
     if os.getuid() != 1000:
         raise SystemExit('Run as the existing management user, UID 1000')
@@ -284,7 +337,7 @@ def main():
     with open(HOME / 'deploy.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         inspect_storage(args.source.resolve(), args.broker_release)
-        if args.restore:restore_portfolio(args.source.resolve())
+        if args.restore:restore_portfolio(args.source.resolve(),args.operator_image)
 
 
 if __name__ == '__main__':

@@ -44,6 +44,45 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(probe.call_args_list[0].kwargs['env']['PGPASSWORD'],'fixture-only-password')
         sleep.assert_called_once_with(2)
 
+    def test_resume_accepts_only_an_empty_initialized_recovery_schema(self):
+        calls=[]
+        def query(sql):
+            calls.append(sql)
+            if 'count(*) FROM pg_tables' in sql:return b'12'
+            if 'to_regclass' in sql:return b't'
+            if 'json_agg' in sql:return b'[{"schema":"portfolio","table":"users"}]'
+            if 'json_build_object' in sql:return b'{"operation":null,"enforced":false}'
+            return b''
+        self.assertTrue(r.reusable_empty_schema(query))
+        self.assertTrue(all(sql.startswith('SELECT') for sql in calls))
+        def nonempty(sql):
+            if sql.startswith('SELECT 1 FROM'):return b'1'
+            return query(sql)
+        with self.assertRaisesRegex(RuntimeError,'business rows'):
+            r.reusable_empty_schema(nonempty)
+
+    def test_resume_never_replays_over_an_acknowledged_database(self):
+        def query(sql):
+            if 'count(*) FROM pg_tables' in sql:return b'12'
+            if 'to_regclass' in sql:return b't'
+            return b'{"operation":"committed-head","enforced":true}'
+        with self.assertRaisesRegex(RuntimeError,'acknowledged head'):
+            r.reusable_empty_schema(query)
+
+    def test_only_interrupted_restore_containers_are_stopped_without_volumes(self):
+        calls=[]
+        def command(args,**options):
+            calls.append(args)
+            if args[1:3]==['ps','-aq']:return b'ours other'
+            if args[1]=='inspect':
+                return json.dumps(['node','dist/server/storage-operator.cjs','restore-empty'] if args[-1]=='ours' else ['node','dist/server/migrate.cjs']).encode()
+            return b''
+        with patch.object(r,'run',side_effect=command):r.stop_interrupted_restore()
+        self.assertIn(['docker','stop','--time','30','ours'],calls)
+        self.assertIn(['docker','rm','ours'],calls)
+        self.assertNotIn(['docker','rm','other'],calls)
+        self.assertFalse(any('--volumes' in args or '-v' in args for args in calls))
+
     def test_existing_database_is_rejected_before_any_restore(self):
         with self.assertRaisesRegex(RuntimeError,'not empty'):
             r.assert_empty_database(lambda sql:b'7\n')
