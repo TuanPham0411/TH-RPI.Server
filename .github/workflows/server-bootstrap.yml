@@ -1,0 +1,116 @@
+name: Deploy server monitor and console manually
+on:
+  workflow_dispatch:
+    inputs:
+      hdmi:
+        description: Enable HDMI console on tty1
+        type: boolean
+        default: true
+      admin_user:
+        description: Existing non-root sudo user for HDMI actions
+        type: string
+        default: thadmin
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: server-bootstrap-th-server-1
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python3 -m unittest discover -s console -p 'test_*.py' -v
+      - run: bash -n console/setup.sh
+      - name: Build and exercise Docker package
+        run: |
+          docker build -f Dockerfile.console -t th-console:test .
+          TH_CONSOLE_DOCKER_TEST=1 python3 -m unittest discover -s console -p 'test_docker_live.py' -v
+          docker run --rm --network none th-console:test > /tmp/console-snapshot.json
+          python3 - <<'PY'
+          import json
+          value=json.load(open('/tmp/console-snapshot.json'))
+          assert value['hostname'] and 'inventory' in value
+          PY
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.console
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/tuanpham0411/th-rpi-console:${{ github.sha }}
+  install:
+    needs: package
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 15
+    permissions: {contents: read, packages: read}
+    env:
+      DOCKER_CONFIG: /tmp/th-console-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check target runner
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          test "$(id -un)" = thadmin
+          test "$(uname -m)" = aarch64
+          docker info >/dev/null
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install only monitor and terminal console
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          ENABLE_HDMI: ${{ inputs.hdmi }}
+          ADMIN_USER: ${{ inputs.admin_user }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$ADMIN_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          image="ghcr.io/tuanpham0411/th-rpi-console:$RELEASE_SHA"
+          docker pull "$image"
+          args=("$RELEASE_SHA" --root /host)
+          if [ "$ENABLE_HDMI" = true ]; then args+=(--hdmi --admin-user "$ADMIN_USER"); fi
+          docker run --rm --network none --pid host --user 0 \
+            --cap-drop ALL --cap-add SYS_CHROOT --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add CHOWN \
+            --mount type=bind,src=/,dst=/host,readonly \
+            --mount type=bind,src=/opt,dst=/host/opt \
+            --mount type=bind,src=/usr/local/bin,dst=/host/usr/local/bin \
+            --mount type=bind,src=/etc/systemd/system,dst=/host/etc/systemd/system \
+            --mount type=bind,src=/run/systemd,dst=/host/run/systemd \
+            --mount type=bind,src=/run/dbus,dst=/host/run/dbus,readonly \
+            --tmpfs /host/tmp:rw,nosuid,nodev,noexec,size=16m \
+            --tmpfs /host/var/tmp:rw,nosuid,nodev,noexec,size=16m \
+            "$image" python3 /app/console/install.py "${args[@]}"
+      - name: Verify host inventory and terminal services
+        env:
+          ENABLE_HDMI: ${{ inputs.hdmi }}
+        run: |
+          set -euo pipefail
+          systemctl is-active th-server-monitor.service
+          if [ "$ENABLE_HDMI" = true ]; then systemctl is-active th-server-console.service; fi
+          python3 - <<'PY'
+          import json,pathlib,time
+          path=pathlib.Path('/var/lib/th-server-console/inventory.json')
+          for attempt in range(30):
+              try:
+                  value=json.loads(path.read_text())
+                  if time.time()-value['at'] < 30 and not value['inventory']['errors']:
+                      print(json.dumps({'inventoryReady':True,'containers':len(value['inventory']['containers']),'services':len(value['inventory']['services'])}));break
+              except (OSError,ValueError,KeyError):pass
+              time.sleep(2)
+          else:raise SystemExit('Monitor did not publish a fresh, successful Docker/systemd inventory')
+          PY
+          for unit in ssh NetworkManager tailscaled cloudflared nginx; do systemctl is-active "$unit"; done

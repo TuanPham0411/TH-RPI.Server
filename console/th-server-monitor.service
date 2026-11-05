@@ -1,0 +1,24 @@
+[Unit]
+Description=TH-Server automatic local application and service inventory
+After=systemd-user-sessions.service docker.service
+
+[Service]
+Type=simple
+User=root
+Environment=LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/th-server-console/current/monitor.py
+Restart=on-failure
+RestartSec=3
+StateDirectory=th-server-console
+StateDirectoryMode=0755
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/var/lib/th-server-console
+MemoryMax=128M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

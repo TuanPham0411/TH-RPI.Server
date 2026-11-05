@@ -84,9 +84,19 @@ definitions, rather than relying on a surviving production schema. This schedule
 protects host configuration separately from synchronous application saves.
 
 
-## HDMI console
+## HDMI / SSH console and automatic server inventory
 
-TH-Server includes a local operations console on tty1: resources, application health, network/Tailscale status, GitHub runners and USB partitions. Network and USB administration require the thadmin sudo password at the physical keyboard. See [console instructions](console/README.md). Immutable ARM64/AMD64 Docker distribution: `ghcr.io/tuanpham0411/th-rpi-console:<commit>`; the display itself runs natively through systemd to access the Pi terminal.
+The portable console discovers Docker containers, Compose applications, local image
+IDs/tags/digests and all installed/loaded systemd services without application
+allowlists. A background monitor refreshes every five seconds and shares its
+snapshot and recent change history between HDMI and SSH. Docker HEALTHCHECK and
+systemd state are reported separately; unavailable sources are marked explicitly.
+
+Native provisioning supports Raspberry Pi OS / Debian with systemd and Python;
+HDMI is optional and no fixed hostname or administrator account is required.
+The Docker distribution is packaged for AMD64/ARM64. The console GitHub workflow
+only tests/packages/publishes; it does not deploy to a server. See
+[setup, HDMI/SSH usage and discovery limits](console/README.md).
 
 
 ## Agent Studio automation

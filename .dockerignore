@@ -5,3 +5,6 @@ config
 state
 run
 *.env
+
+**/__pycache__
+**/*.pyc

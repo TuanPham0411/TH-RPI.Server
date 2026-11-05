@@ -22,12 +22,17 @@ class ConsoleTests(unittest.TestCase):
   with patch.object(c,'block_devices',return_value=[{'path':'/dev/sda1','mountpoints':['/mnt/th-usb-data']}]),patch.object(c.subprocess,'run') as run:
    with self.assertRaises(ValueError):c.usb_action('/dev/sda1')
    run.assert_not_called()
- def test_health_requires_application_ready_payload(self):
-  class Response:
-   status=200
-   def __enter__(self):return self
-   def __exit__(self,*a):pass
-   def read(self):return b'{"ok":true}'
-  with patch.object(c.urllib.request,'urlopen',return_value=Response()):self.assertEqual(c.health(c.APPS[0])[1],'HEALTHY')
-  with patch.object(c.urllib.request,'urlopen',side_effect=OSError()):self.assertEqual(c.health(c.APPS[0])[1],'UNREACHABLE')
+ def test_ssh_admin_uses_current_user_sudo_without_fixed_account(self):
+  with patch.object(c.os,'geteuid',return_value=1000):
+   self.assertEqual(c.admin_command('--network')[:2],['sudo','--'])
+ def test_hdmi_requires_configured_non_root_administrator(self):
+  with patch.object(c.os,'geteuid',return_value=0),patch.dict(c.os.environ,{'TH_CONSOLE_ADMIN_USER':''}):
+   with self.assertRaises(ValueError):c.admin_command('--network')
+ def test_dynamic_application_and_service_pages(self):
+  value={'inventory':{'errors':{},'containers':[{'id':'c','name':'new-app','state':'running','health':'unhealthy','project':'new-stack','service':'web','image':'custom:v2','image_id':'sha256:new','ports':{}}],'images':[],'services':[{'id':'new-agent.service','state':'failed','sub':'failed','enabled':'enabled','pid':0,'description':'New agent','load':'loaded','result':'exit-code'}]}}
+  self.assertIn('health=unhealthy','\n'.join(c.lines_for(value,5)))
+  self.assertIn('new-agent.service','\n'.join(c.lines_for(value,6)))
+ def test_discovery_failure_is_visible(self):
+  value={'inventory':{'errors':{'containers':'permission denied'},'containers':[],'images':[],'services':[]}}
+  self.assertIn('DISCOVERY UNAVAILABLE',c.lines_for(value,5)[0])
 if __name__=='__main__':unittest.main()
