@@ -14,6 +14,10 @@ jobs:
           commands=[['systemctl','show','cloudflared','-p','ActiveState','-p','SubState','-p','Result','-p','NRestarts','-p','ExecMainStatus','-p','MemoryCurrent'],['free','-m'],['uptime']]
           for command in commands:
               result=subprocess.run(command,capture_output=True,text=True);print(result.stdout)
+          result=subprocess.run(['systemctl','show','cloudflared','-p','ExecStart','--value'],capture_output=True,text=True)
+          print(json.dumps({'explicitTunnelProtocols':re.findall(r'--protocol(?:=|\s+)(quic|http2|auto)',result.stdout)}))
+          result=subprocess.run(['systemctl','show','cloudflared','-p','Environment','--value'],capture_output=True,text=True)
+          print(json.dumps({'tunnelProtocolEnvironment':re.findall(r'TUNNEL_TRANSPORT_PROTOCOL=(quic|http2|auto)',result.stdout)}))
           result=subprocess.run(['journalctl','-u','cloudflared','--since','30 minutes ago','--no-pager','-o','cat'],capture_output=True,text=True)
           text=result.stdout+result.stderr
           patterns=['Registered tunnel connection','Unregistered tunnel connection','Unable to establish connection','failed to dial','timeout','connection refused','no route to host','network is unreachable','Failed to serve tunnel','authentication','Unauthorized','permission denied','QUIC','http2','out of memory']
