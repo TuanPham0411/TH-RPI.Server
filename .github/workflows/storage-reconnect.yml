@@ -1,0 +1,24 @@
+name: Refresh retained storage connection
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: portfolio-recovery-th-server-1, cancel-in-progress: false}
+jobs:
+  reconnect:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - name: Refresh broker and verify acknowledged database writes
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          python3 deploy/storage-reconnect.py
+      - name: Verify access and independent services
+        if: always()
+        run: |
+          systemctl is-active th-server-monitor.service th-server-console.service ssh NetworkManager tailscaled cloudflared nginx
+          curl --fail --silent --show-error --max-time 30 https://esp.th.io.vn/healthz
+          curl --fail --silent --show-error --max-time 30 https://got.th.io.vn/healthz

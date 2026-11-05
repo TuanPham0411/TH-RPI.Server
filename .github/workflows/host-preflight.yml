@@ -47,3 +47,15 @@ jobs:
           docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}'
           docker volume ls --format '{{.Name}}'
           systemctl is-active th-server-monitor.service th-server-console.service ssh nginx cloudflared
+      - name: Compare OAuth configuration without revealing credential values
+        run: |
+          python3 - <<'PY'
+          import pathlib,json
+          home=pathlib.Path.home()
+          config=json.loads((home/'th-platform/config/runtime.json').read_text())['oauth']
+          values={}
+          for line in (home/'apps/portfolio/.env').read_text().splitlines():
+              key,sep,value=line.partition('=')
+              if sep and not key.lstrip().startswith('#'):values[key.strip()]=value.strip().strip('\"\x27')
+          print(json.dumps({'portfolioClientIdMatchesWorkingBroker':values.get('GOOGLE_CLIENT_ID')==config.get('clientId'),'portfolioClientSecretMatchesWorkingBroker':values.get('GOOGLE_CLIENT_SECRET')==config.get('clientSecret')}))
+          PY
