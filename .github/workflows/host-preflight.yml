@@ -47,3 +47,17 @@ jobs:
           docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}'
           docker volume ls --format '{{.Name}}'
           systemctl is-active th-server-monitor.service th-server-console.service ssh nginx cloudflared
+      - name: Diagnose Portfolio OAuth without account or credential values
+        run: |
+          python3 - <<'PY'
+          import subprocess,re,json
+          for container in ['portfolio-portfolio-1','th-platform-storage-1']:
+              result=subprocess.run(['docker','logs','--since','2h','--tail','300',container],capture_output=True,text=True)
+              text=result.stdout+result.stderr
+              codes=re.findall(r"Portfolio request failed.*?code: ['\"]([A-Za-z0-9_]+)",text)
+              reasons=[value for value in ['Drive OAuth refresh failed','Drive and PostgreSQL differ','Missing or corrupt event','Multiple Drive writers','permission denied','fetch failed','Drive request failed','projection differs'] if value.lower() in text.lower()]
+              print(json.dumps({'container':container,'errorCodes':codes[-20:],'recognizedReasons':reasons}))
+          sql="SELECT json_build_object('pgcrypto',(SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='pgcrypto'),'crypt',to_regprocedure('extensions.crypt(text,text)') IS NOT NULL,'genSalt',to_regprocedure('extensions.gen_salt(text,integer)') IS NOT NULL,'schemaUsage',has_schema_privilege('th_api','extensions','USAGE'),'cryptExecute',CASE WHEN to_regprocedure('extensions.crypt(text,text)') IS NULL THEN false ELSE has_function_privilege('th_api','extensions.crypt(text,text)','EXECUTE') END,'head',public.th_storage_head())"
+          result=subprocess.run(['docker','exec','-i','portfolio-database-1','psql','-X','-U','postgres','-d','th_portfolio','-At','-v','ON_ERROR_STOP=1'],input=sql,text=True,capture_output=True)
+          print(result.stdout if result.returncode==0 else json.dumps({'databaseDiagnosticFailed':True}))
+          PY
