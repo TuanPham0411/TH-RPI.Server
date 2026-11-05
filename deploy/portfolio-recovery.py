@@ -307,10 +307,12 @@ def restore_portfolio(source, operator_image):
     print(json.dumps({'phase':'public-route'}),flush=True)
     run(route_command)
     try:
-        with urllib.request.urlopen('https://th.io.vn/api/health',timeout=30) as response:
-            if not json.load(response).get('ok'):raise RuntimeError('Public Portfolio health failed')
-        with urllib.request.urlopen('https://th.io.vn/api/portfolio/content/',timeout=30) as response:
-            if not json.load(response):raise RuntimeError('Public Portfolio content is empty')
+        # Use the same TLS-verifying client as normal deployment health checks.
+        # Cloudflare may reject Python's default urllib user agent.
+        def public_json(path):
+            return json.loads(run(['curl','--fail','--silent','--show-error','--max-time','30','https://th.io.vn'+path]))
+        if not public_json('/api/health').get('ok'):raise RuntimeError('Public Portfolio health failed')
+        if not public_json('/api/portfolio/content/'):raise RuntimeError('Public Portfolio content is empty')
     except Exception:
         run(route_command+['rollback'])
         raise RuntimeError('Public verification failed; previous Nginx route restored, recovered data retained')
