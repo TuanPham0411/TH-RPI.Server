@@ -137,3 +137,17 @@ sudo systemctl enable --now getty@tty1.service
 
 Dừng inventory nền: `sudo systemctl disable --now th-server-monitor.service`.
 Các lệnh này không xóa application, image, dữ liệu hay cấu hình mạng hiện có.
+
+## Triển khai thủ công qua runner th-server-1
+
+Workflow `server-bootstrap.yml` chỉ chạy bằng `workflow_dispatch`. Nó kiểm thử
+và publish image immutable trên GitHub-hosted runner, sau đó cài monitor/console
+trên runner tên `th-server-1`, nhãn `th-server-bootstrap`. Không chạy storage
+bootstrap, không dựng lại ứng dụng, không sửa OS/SSH/network configuration.
+Runner cần quyền Docker hiện có; không thêm sudo không mật khẩu.
+
+Sau khi mã này có trên GitHub và runner đã Online/Idle, chọn Actions →
+Deploy server monitor and console manually → Run workflow. Chọn đúng nhánh
+chứa bản sửa, bật `hdmi` nếu muốn thay tty1, và nhập tài khoản sudo hiện có
+(với máy hiện tại là `thadmin`). Đây là thao tác triển khai chủ động; workflow
+`console.yml` vẫn chỉ đóng gói và không tự deploy khi push.
