@@ -1,0 +1,49 @@
+name: Inspect fresh server configuration
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  inspect:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - name: Inspect deployment prerequisites without exposing values
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          home=pathlib.Path.home()
+          def environment_names(path):
+              if not path.is_file():return {'exists':False,'setNames':[]}
+              names=[]
+              for line in path.read_text().splitlines():
+                  key,sep,value=line.partition('=')
+                  if sep and not key.lstrip().startswith('#') and value.strip().strip('\"\x27'):names.append(key.strip())
+              return {'exists':True,'setNames':sorted(set(names))}
+          paths=[home/'apps/portfolio/.env',pathlib.Path('/etc/th-app/runtime.env')]
+          for path in paths:print(json.dumps({'environmentFile':str(path),**environment_names(path)}))
+          for name in ['runtime.json','drive-credentials.json','recovery-key.txt']:
+              path=home/'th-platform/config'/name
+              row={'configFile':name,'exists':path.is_file()}
+              if name.endswith('.json') and path.is_file():
+                  try:
+                      value=json.loads(path.read_text())
+                      if name=='runtime.json':
+                          oauth=value.get('oauth',{});row.update(oauthClientConfigured=bool(oauth.get('clientId') and oauth.get('clientSecret')),portfolioTokenConfigured=bool(value.get('tokens',{}).get('portfolio')))
+                      else:row['refreshTokenConfigured']=bool(value.get('refreshToken'))
+                  except (ValueError,OSError):row['readableJson']=False
+              print(json.dumps(row))
+          for path in [home/'th-platform/state/backups/portfolio',home/'apps/portfolio',pathlib.Path('/var/backups/th-portfolio')]:
+              try:children=sorted(p.name for p in path.iterdir())
+              except OSError:children=[]
+              print(json.dumps({'directory':str(path),'entries':children}))
+          site=pathlib.Path('/etc/nginx/sites-available/th-portfolio')
+          if site.is_file():
+              routing=[line.strip() for line in site.read_text().splitlines() if line.strip().startswith(('listen ','server_name ','proxy_pass ','root '))]
+              print(json.dumps({'portfolioNginxRouting':routing}))
+          PY
+          docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}'
+          docker volume ls --format '{{.Name}}'
+          systemctl is-active th-server-monitor.service th-server-console.service ssh nginx cloudflared
