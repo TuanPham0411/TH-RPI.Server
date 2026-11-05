@@ -1,14 +1,25 @@
 import pg from 'pg';
 import {readFile,writeFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
-import {restore,operatorBroker} from '../storage/operator.mjs';
-import {tokenSupplier} from '../storage/oauth.mjs';
+import {restore} from '../storage/operator.mjs';
+import {tokenSupplier,ensureRoot} from '../storage/oauth.mjs';
+import {GoogleDriveTransport} from '../storage/google-drive.mjs';
+import {Coordinator} from '../storage/coordinator.mjs';
 import {cachedJournal,verifiedDownloader} from './recovery-files.mjs';
 
 async function main(){
  const config=JSON.parse(await readFile('/config/runtime.json','utf8'));
  const accessToken=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
- const journal=await cachedJournal(operatorBroker('portfolio'),{progress:(completed,total)=>console.log(JSON.stringify({phase:'verified-journal',completed,total}))});
+ const transport=new GoogleDriveTransport({rootId:await ensureRoot(accessToken),accessToken});
+ const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret});
+ const history=await coordinator.history('portfolio');
+ await transport.list('portfolio/events/');
+ const markers=new Map(history.map(marker=>[marker.id,marker]));
+ const journal=await cachedJournal(async(path,value)=>{
+  if(path==='/v1/history')return {history};
+  if(path==='/v1/event'&&markers.has(value.id))return coordinator.event('portfolio',markers.get(value.id));
+  throw Error('Recovery journal is read-only');
+ },{progress:(completed,total)=>console.log(JSON.stringify({phase:'verified-journal',completed,total}))});
  let reusedMedia=0,downloadedMedia=0;
  const restoreFile=verifiedDownloader({root:process.env.FILES_ROOT||'/data/files',
   fetchReference:async reference=>fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(reference.id)+'?alt=media',{headers:{Authorization:'Bearer '+await accessToken()},signal:AbortSignal.timeout(300000)}),
