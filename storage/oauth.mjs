@@ -1,9 +1,8 @@
 import {readFile} from 'node:fs/promises';
 
 export function tokenSupplier({credentialsPath,clientId,clientSecret,expectedEmail,fetchImpl=fetch}){
- let cached;
- return async()=>{
-  if(cached&&cached.expires>Date.now()+60000)return cached.token;
+ let cached,refreshing;
+ async function refresh(){
   const credentials=JSON.parse(await readFile(credentialsPath,'utf8'));
   if(!credentials.refreshToken||credentials.email?.toLowerCase()!==expectedEmail.toLowerCase())throw Error('Drive owner or offline grant differs');
   const response=await fetchImpl('https://oauth2.googleapis.com/token',{method:'POST',body:new URLSearchParams({client_id:clientId,client_secret:clientSecret,refresh_token:credentials.refreshToken,grant_type:'refresh_token'}),signal:AbortSignal.timeout(30000)});
@@ -12,7 +11,16 @@ export function tokenSupplier({credentialsPath,clientId,clientSecret,expectedEma
   const identity=await fetchImpl('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:`Bearer ${value.access_token}`},signal:AbortSignal.timeout(20000)});
   const user=await identity.json();if(!identity.ok||user.email_verified!==true||user.email?.toLowerCase()!==expectedEmail.toLowerCase())throw Error('Authenticated Drive owner differs');
   cached={token:value.access_token,expires:Date.now()+Number(value.expires_in||3600)*1000};return cached.token;
+ }
+ const supply=async()=>{
+  if(cached&&cached.expires>Date.now()+60000)return cached.token;
+  if(!refreshing)refreshing=refresh().finally(()=>{refreshing=null;});
+  return refreshing;
  };
+ // A new consent on a shared Google client can invalidate an access token
+ // before its advertised expiry. Do not evict a newer token for an old request.
+ supply.invalidate=rejected=>{if(cached?.token===rejected)cached=null;};
+ return supply;
 }
 
 export async function ensureRoot(accessToken,fetchImpl=fetch){
