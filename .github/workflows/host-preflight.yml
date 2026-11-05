@@ -59,3 +59,16 @@ jobs:
               if sep and not key.lstrip().startswith('#'):values[key.strip()]=value.strip().strip('\"\x27')
           print(json.dumps({'portfolioClientIdMatchesWorkingBroker':values.get('GOOGLE_CLIENT_ID')==config.get('clientId'),'portfolioClientSecretMatchesWorkingBroker':values.get('GOOGLE_CLIENT_SECRET')==config.get('clientSecret')}))
           PY
+      - name: Verify actual application OAuth configuration and runtime database role
+        run: |
+          python3 - <<'PY'
+          import subprocess,json,pathlib
+          config=json.loads((pathlib.Path.home()/'th-platform/config/runtime.json').read_text())['oauth']
+          code="""import pg from 'pg';import {readFileSync} from 'node:fs';const expected=JSON.parse(readFileSync(0,'utf8'));const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});try{const {rows:[row]}=await pool.query(\"SELECT current_user='th_api' AS runtime_role, extensions.crypt('runtime-check',extensions.gen_salt('bf',4)) IS NOT NULL AS password_crypto\");console.log(JSON.stringify({runtimeClientIdMatches:process.env.GOOGLE_CLIENT_ID===expected.clientId,runtimeClientSecretMatches:process.env.GOOGLE_CLIENT_SECRET===expected.clientSecret,...row}));}finally{await pool.end();}"""
+          result=subprocess.run(['docker','exec','-i','portfolio-portfolio-1','node','--input-type=module','-e',code],input=json.dumps({'clientId':config['clientId'],'clientSecret':config['clientSecret']}),text=True,capture_output=True)
+          if result.returncode:raise SystemExit('Runtime OAuth diagnostic failed; no credentials printed')
+          print(result.stdout)
+          result=subprocess.run(['docker','exec','portfolio-portfolio-1','node','dist/server/storage-operator.cjs','probe'],text=True,capture_output=True)
+          if result.returncode:raise SystemExit('Runtime write-through probe failed; production data retained')
+          print(result.stdout)
+          PY
