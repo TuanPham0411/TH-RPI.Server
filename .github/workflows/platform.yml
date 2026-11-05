@@ -56,7 +56,9 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/TuanPham0411/TH-RPI.Server
   deploy-broker:
     needs: image
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/storage/platform')
+    # Legacy in-place broker upgrades require explicit dispatch. Fresh recovery
+    # uses portfolio-recovery.yml and must not race this Ticket-dependent script.
+    if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/storage/platform')
     runs-on: [self-hosted, Linux, ARM64]
     permissions: {contents: read, packages: read}
     env:

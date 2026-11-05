@@ -1,12 +1,24 @@
 name: Recover Portfolio from retained Drive storage
 on:
   workflow_dispatch:
+    inputs:
+      restore:
+        description: Restore existing Portfolio data and publish the verified site
+        type: boolean
+        default: false
 permissions: {contents: read, packages: read}
 concurrency:
   group: portfolio-recovery-th-server-1
   cancel-in-progress: false
 jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: python3 -m unittest discover -s tests -p 'test_portfolio_recovery.py' -v
   recover:
+    needs: validate
     runs-on: [th-server-bootstrap]
     timeout-minutes: 40
     env:
@@ -24,4 +36,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Reconnect storage and inspect recovery metadata
-        run: python3 deploy/portfolio-recovery.py --source "$GITHUB_WORKSPACE"
+        env:
+          RESTORE: ${{ inputs.restore }}
+        run: |
+          args=(--source "$GITHUB_WORKSPACE")
+          if [ "$RESTORE" = true ]; then args+=(--restore); fi
+          python3 deploy/portfolio-recovery.py "${args[@]}"
+      - name: Verify management and access services
+        run: |
+          systemctl is-active th-server-monitor.service th-server-console.service ssh NetworkManager tailscaled cloudflared nginx
