@@ -52,14 +52,14 @@ def broker(config, application, path, value, timeout=300):
         connection.close()
 
 
-def inspect_storage(source):
+def inspect_storage(source, broker_release=None):
     config_path = HOME / 'config/runtime.json'
     credentials = HOME / 'config/drive-credentials.json'
     if not config_path.is_file() or not credentials.is_file():
         raise RuntimeError('Retained Drive configuration is required')
     config = json.loads(config_path.read_text())
     state = json.loads((HOME / 'state/deployment.json').read_text())
-    image_tag = state.get('imageTag', '')
+    image_tag = broker_release or state.get('imageTag', '')
     if not re.fullmatch('[a-f0-9]{40}', image_tag):
         raise RuntimeError('A verified retained storage release is required')
     for name in ('ai-agent_ai-files', 'portfolio_media', 'ticket_media'):
@@ -114,6 +114,11 @@ def inspect_storage(source):
     path = target / 'definition.json'
     path.write_text(json.dumps(definition))
     path.chmod(0o600)
+    if broker_release:
+        temporary=HOME/'state/deployment-recovered.tmp'
+        temporary.write_text(json.dumps({**state,'imageTag':image_tag,'release':str(release),'ready':True}))
+        temporary.chmod(0o600)
+        temporary.replace(HOME/'state/deployment.json')
     print(json.dumps({'driveConnected': True, 'portfolioOperations': len(portfolio_history),
                       'portfolioHead': portfolio_history[-1]['id'], 'release': definition['release'],
                       'schemaSnapshotAvailable': True, 'migrationCatalogs': len(definition['migrations'])}), flush=True)
@@ -260,6 +265,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=pathlib.Path, required=True)
     parser.add_argument('--restore', action='store_true')
+    parser.add_argument('--broker-release')
     args = parser.parse_args()
     if os.getuid() != 1000:
         raise SystemExit('Run as the existing management user, UID 1000')
@@ -267,7 +273,7 @@ def main():
     HOME.mkdir(parents=True, exist_ok=True)
     with open(HOME / 'deploy.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        inspect_storage(args.source.resolve())
+        inspect_storage(args.source.resolve(), args.broker_release)
         if args.restore:restore_portfolio(args.source.resolve())
 
 

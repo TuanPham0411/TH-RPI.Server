@@ -2,6 +2,10 @@ name: Recover Portfolio from retained Drive storage
 on:
   workflow_dispatch:
     inputs:
+      broker_release:
+        description: Optional tested immutable TH-RPI.Server broker image SHA
+        type: string
+        default: ''
       diagnose:
         description: Run read-only diagnostics without reconnecting or restoring data
         type: boolean
@@ -43,8 +47,10 @@ jobs:
         if: inputs.diagnose != true
         env:
           RESTORE: ${{ inputs.restore }}
+          BROKER_RELEASE: ${{ inputs.broker_release }}
         run: |
           args=(--source "$GITHUB_WORKSPACE")
+          if [ -n "$BROKER_RELEASE" ]; then args+=(--broker-release "$BROKER_RELEASE"); fi
           if [ "$RESTORE" = true ]; then args+=(--restore); fi
           python3 deploy/portfolio-recovery.py "${args[@]}"
       - name: Verify management and access services

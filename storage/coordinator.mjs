@@ -27,8 +27,13 @@ export class Coordinator {
  }
  async history(app){
   this.checkApp(app);const prefix=`${app}/commits/`;const keys=await this.transport.list(prefix);const markers=[];
-  for(const key of keys){const raw=await this.transport.get(key);if(!raw)throw Error('Commit disappeared');const marker=JSON.parse(raw);
-   if(marker.schemaVersion!==1||!validId(marker.id)||marker.parent!==null&&!validId(marker.parent)||key!==`${prefix}${marker.id}.json`)throw Error('Invalid commit marker');markers.push(marker);
+  // Bounded parallel reads preserve all identity/chain checks without issuing
+  // thousands of sequential Drive requests during a cold start.
+  for(let offset=0;offset<keys.length;offset+=4){
+   const batch=await Promise.all(keys.slice(offset,offset+4).map(async key=>{
+    const raw=await this.transport.get(key);if(!raw)throw Error('Commit disappeared');const marker=JSON.parse(raw);
+    if(marker.schemaVersion!==1||!validId(marker.id)||marker.parent!==null&&!validId(marker.parent)||key!==`${prefix}${marker.id}.json`)throw Error('Invalid commit marker');return marker;
+   }));markers.push(...batch);
   }
   const ordered=[];let parent=null;
   while(true){const next=markers.filter(marker=>marker.parent===parent);if(next.length>1)throw Error('Multiple Drive writers detected');if(!next.length)break;ordered.push(next[0]);parent=next[0].id;if(ordered.length>markers.length)throw Error('Invalid history');}
