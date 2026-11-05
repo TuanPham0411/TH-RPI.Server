@@ -52,7 +52,7 @@ jobs:
           python3 - <<'PY'
           import subprocess,re,json,collections
           for container in ['portfolio-portfolio-1','th-platform-storage-1']:
-              result=subprocess.run(['docker','logs','--since','2h','--tail','300',container],capture_output=True,text=True)
+              result=subprocess.run(['docker','logs','--since','15m','--tail','300',container],capture_output=True,text=True)
               text=result.stdout+result.stderr
               codes=re.findall(r"Portfolio request failed.*?code: ['\"]([A-Za-z0-9_-]+)",text)
               reasons=[value for value in ['Drive OAuth refresh failed','Drive and PostgreSQL differ','Missing or corrupt event','Multiple Drive writers','permission denied','fetch failed','Drive request failed','projection differs'] if value.lower() in text.lower()]
@@ -82,19 +82,19 @@ jobs:
             const rootResponse=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(root.folderId)+'?fields=capabilities(canAddChildren)',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
             const permissions=await rootResponse.json();
             console.log(JSON.stringify({driveFolderPermissionStatus:rootResponse.status,canAddChildren:permissions.capabilities?.canAddChildren,reasons:(permissions.error?.errors||[]).map(x=>x.reason)}));
-            const transport=new GoogleDriveTransport({rootId:root.folderId,accessToken:token,fetchImpl:async(...args)=>{
-              const response=await fetch(...args);
-              if(!response.ok){
-                const body=await response.clone().json().catch(()=>({}));
-                console.log(JSON.stringify({driveReadFailureStatus:response.status,reasons:(body.error?.errors||[]).map(x=>x.reason),status:body.error?.status}));
-              }
-              return response;
-            }});
-            const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret});
-            const history=await coordinator.history('portfolio');
-            console.log(JSON.stringify({verifiedHistory:history.length}));
-            await transport.list('portfolio/events/');
-            for(let offset=0;offset<history.length;offset+=4){await Promise.all(history.slice(offset,offset+4).map(marker=>coordinator.event('portfolio',marker)));}
-            console.log(JSON.stringify({verifiedEvents:history.length}));
+            const boundary='th-runtime-probe-'+crypto.randomUUID();
+            const body='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:boundary+'.json',parents:[root.folderId],mimeType:'application/json'})+'\r\n--'+boundary+'\r\nContent-Type: application/json\r\n\r\n{"purpose":"runtime-write-verification"}\r\n--'+boundary+'--';
+            const created=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',{method:'POST',headers:{Authorization:'Bearer '+await token(),'Content-Type':'multipart/related; boundary='+boundary},body,signal:AbortSignal.timeout(30000)});
+            const createdBody=await created.json();
+            console.log(JSON.stringify({driveWriteProbeStatus:created.status,reasons:(createdBody.error?.errors||[]).map(x=>x.reason)}));
+            if(created.ok&&createdBody.id){
+              const removed=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(createdBody.id),{method:'DELETE',headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
+              console.log(JSON.stringify({ownProbeCleanupStatus:removed.status}));
+            }
+            const {brokerRequest}=await import('./storage/client.mjs');
+            try{
+              const live=await brokerRequest({application:'portfolio',socketPath:'/run/th-storage/storage.sock',token:config.tokens.portfolio},'/v1/history',{});
+              console.log(JSON.stringify({liveBrokerHistory:true,operations:live.history.length}));
+            }catch(error){console.log(JSON.stringify({liveBrokerHistory:false,code:error.code||null}));}
           } catch(error) { console.log(JSON.stringify({driveProbeFailed:true,type:error.name})); }
           JS
