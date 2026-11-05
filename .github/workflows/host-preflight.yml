@@ -56,7 +56,7 @@ jobs:
               text=result.stdout+result.stderr
               codes=re.findall(r"Portfolio request failed.*?code: ['\"]([A-Za-z0-9_-]+)",text)
               reasons=[value for value in ['Drive OAuth refresh failed','Drive and PostgreSQL differ','Missing or corrupt event','Multiple Drive writers','permission denied','fetch failed','Drive request failed','projection differs'] if value.lower() in text.lower()]
-              print(json.dumps({'container':container,'errorCodes':dict(collections.Counter(codes)),'driveHttpStatuses':re.findall(r'Drive request failed \((\d+)\)',text)[-20:],'recognizedReasons':reasons}))
+              print(json.dumps({'container':container,'errorCodes':dict(collections.Counter(codes)),'operations':dict(collections.Counter(re.findall(r"operation: ['\"](/v1/[a-z-]+)",text))),'driveHttpStatuses':re.findall(r'Drive request failed \((\d+)\)',text)[-20:],'recognizedReasons':reasons}))
           sql="SELECT json_build_object('pgcrypto',(SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname='pgcrypto'),'crypt',to_regprocedure('extensions.crypt(text,text)') IS NOT NULL,'genSalt',to_regprocedure('extensions.gen_salt(text,integer)') IS NOT NULL,'schemaUsage',has_schema_privilege('th_api','extensions','USAGE'),'cryptExecute',CASE WHEN to_regprocedure('extensions.crypt(text,text)') IS NULL THEN false ELSE has_function_privilege('th_api','extensions.crypt(text,text)','EXECUTE') END,'head',public.th_storage_head())"
           result=subprocess.run(['docker','exec','-i','portfolio-database-1','psql','-X','-U','postgres','-d','th_portfolio','-At','-v','ON_ERROR_STOP=1'],input=sql,text=True,capture_output=True)
           print(result.stdout if result.returncode==0 else json.dumps({'databaseDiagnosticFailed':True}))
@@ -74,5 +74,11 @@ jobs:
             const quotaResponse=await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
             const quota=await quotaResponse.json();
             console.log(JSON.stringify({driveQuotaStatus:quotaResponse.status,storageQuota:quota.storageQuota||null,reasons:(quota.error?.errors||[]).map(x=>x.reason)}));
+            const idResponse=await fetch('https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
+            const ids=await idResponse.json();
+            console.log(JSON.stringify({driveGenerateIdStatus:idResponse.status,reasons:(ids.error?.errors||[]).map(x=>x.reason)}));
+            const rootResponse=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(root.folderId)+'?fields=capabilities(canAddChildren)',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
+            const permissions=await rootResponse.json();
+            console.log(JSON.stringify({driveFolderPermissionStatus:rootResponse.status,canAddChildren:permissions.capabilities?.canAddChildren,reasons:(permissions.error?.errors||[]).map(x=>x.reason)}));
           } catch(error) { console.log(JSON.stringify({driveProbeFailed:true,type:error.name})); }
           JS
