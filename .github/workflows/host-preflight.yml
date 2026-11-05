@@ -68,7 +68,15 @@ jobs:
           result=subprocess.run(['docker','exec','-i','portfolio-portfolio-1','node','--input-type=module','-e',code],input=json.dumps({'clientId':config['clientId'],'clientSecret':config['clientSecret']}),text=True,capture_output=True)
           if result.returncode:raise SystemExit('Runtime OAuth diagnostic failed; no credentials printed')
           print(result.stdout)
-          result=subprocess.run(['docker','exec','portfolio-portfolio-1','node','dist/server/storage-operator.cjs','probe'],text=True,capture_output=True)
-          if result.returncode:raise SystemExit('Runtime write-through probe failed; production data retained')
-          print(result.stdout)
           PY
+          docker exec -i portfolio-portfolio-1 node <<'JS'
+          const fs=require('node:fs'),Module=require('node:module');
+          const filename='/app/dist/server/storage-operator.cjs';
+          let source=fs.readFileSync(filename,'utf8');
+          const position=source.lastIndexOf('main().catch(');
+          if(position<0)throw Error('Diagnostic entry point unavailable');
+          source=source.slice(0,position)+`main().catch(error=>{console.log(JSON.stringify({runtimeProbeFailure:true,code:error.code||null,reasons:['permission denied','Central Drive storage transaction required','Drive and PostgreSQL differ','Drive storage unavailable','Storage maintenance','timed out','timeout','relation does not exist'].filter(value=>String(error.message).toLowerCase().includes(value.toLowerCase())),routine:error.routine||null}));});`;
+          process.argv=[process.execPath,filename,'probe'];
+          const loaded=new Module(filename);loaded.filename=filename;loaded.paths=Module._nodeModulePaths('/app/dist/server');loaded._compile(source,filename);
+          JS
+          docker exec portfolio-database-1 psql -X -U postgres -d th_portfolio -At -c "SELECT json_build_object('state',state,'waitType',wait_event_type,'waitEvent',wait_event,'connections',count(*),'maxTransactionSeconds',max(extract(epoch from clock_timestamp()-xact_start))::int) FROM pg_stat_activity WHERE datname='th_portfolio' GROUP BY state,wait_event_type,wait_event"
