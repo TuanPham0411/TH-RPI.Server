@@ -1,0 +1,47 @@
+name: Deploy GoT with management runner
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the tested GoT image and enable the public route
+        type: boolean
+        default: false
+      image_sha:
+        description: Immutable published TH-GoT image/source SHA
+        type: string
+        default: 7670afd5d5282d1e462ba90419b4cbd02279d664
+permissions: {contents: read, packages: read}
+concurrency: {group: got-th-server-1, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 15
+    env:
+      DOCKER_CONFIG: /tmp/th-got-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        if: inputs.deploy == true
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Inspect GoT deployment prerequisites
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          python3 -m unittest discover -s tests -p 'test_got_deploy.py' -v
+          python3 deploy/got-deploy.py
+      - name: Deploy and verify GoT
+        if: inputs.deploy == true
+        env:
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: python3 deploy/got-deploy.py --deploy --image-sha "$IMAGE_SHA"
+      - name: Verify existing services
+        if: always()
+        run: |
+          systemctl is-active th-server-monitor.service th-server-console.service ssh NetworkManager tailscaled cloudflared nginx
+          curl --fail --silent --show-error --max-time 20 https://th.io.vn/api/health
+          curl --fail --silent --show-error --max-time 20 https://esp.th.io.vn/healthz
