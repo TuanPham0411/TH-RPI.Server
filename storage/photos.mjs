@@ -15,7 +15,7 @@ export class Photos {
   for(const [id,value] of this.pending)if(value.expires<Date.now())this.pending.delete(id);
   const state=randomBytes(32).toString('hex'),verifier=randomBytes(32).toString('hex');
   this.pending.set(state,{binding,verifier,expires:Date.now()+600000});
-  return {state,url:'https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:this.oauth.clientId,redirect_uri:redirect,response_type:'code',scope,access_type:'offline',prompt:'consent',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'})};
+  return {state,url:'https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:this.oauth.clientId,redirect_uri:redirect,response_type:'code',scope,include_granted_scopes:'true',access_type:'offline',prompt:'consent',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'})};
  }
  async callback({binding,state,code}){
   const pending=this.pending.get(state);this.pending.delete(state);

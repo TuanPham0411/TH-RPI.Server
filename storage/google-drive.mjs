@@ -9,13 +9,25 @@ export class GoogleDriveTransport {
     this.rootId = rootId; this.accessToken = accessToken; this.fetch = fetchImpl; this.readIndex = new Map();
   }
   async request(path, init = {}, upload = false) {
-    const token = await this.accessToken();
-    const response = await this.fetch(`https://www.googleapis.com/${upload ? 'upload/' : ''}drive/v3/${path}`, {
-      ...init, headers: {...init.headers, Authorization: `Bearer ${token}`},
-      signal: AbortSignal.timeout(60000)
-    });
-    if (!response.ok) throw Error(`Drive request failed (${response.status}); operation not acknowledged`);
-    return response;
+    const authReasons = new Set(['insufficientPermissions','authError','appNotAuthorizedToFile']);
+    const safeReasons = new Set([...authReasons,'rateLimitExceeded','userRateLimitExceeded','dailyLimitExceeded','downloadQuotaExceeded','storageQuotaExceeded','accessNotConfigured','forbidden','notFound','cannotDownloadAbusiveFile']);
+    for(let attempt=0;attempt<2;attempt++){
+      const token = await this.accessToken();
+      const response = await this.fetch(`https://www.googleapis.com/${upload ? 'upload/' : ''}drive/v3/${path}`, {
+        ...init, headers: {...init.headers, Authorization: `Bearer ${token}`},
+        signal: AbortSignal.timeout(60000)
+      });
+      if(response.ok)return response;
+      const body=await response.json().catch(()=>({}));
+      const reasons=(body.error?.errors||[]).map(value=>value.reason);
+      const rejected=response.status===401||response.status===403&&reasons.some(reason=>authReasons.has(reason));
+      if(attempt===0&&rejected&&typeof this.accessToken.invalidate==='function'){
+        this.accessToken.invalidate(token);
+        continue;
+      }
+      const classified=reasons.filter(reason=>safeReasons.has(reason));
+      throw Error(`Drive request failed (${response.status}) [${classified.join(',')||'unclassified'}]; operation not acknowledged`);
+    }
   }
   parts(key) {
     const parts = key.split('/');

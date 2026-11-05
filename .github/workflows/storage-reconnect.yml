@@ -1,21 +1,37 @@
 name: Refresh retained storage connection
 on:
   workflow_dispatch:
-permissions: {contents: read}
+    inputs:
+      broker_sha:
+        description: Optional tested immutable storage image SHA
+        type: string
+        default: ''
+permissions: {contents: read, packages: read}
 concurrency: {group: portfolio-recovery-th-server-1, cancel-in-progress: false}
 jobs:
   reconnect:
     runs-on: [th-server-bootstrap]
     timeout-minutes: 25
+    env:
+      DOCKER_CONFIG: /tmp/th-storage-refresh-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v5
         with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        if: inputs.broker_sha != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Refresh broker and verify acknowledged database writes
         env:
           SELECTED_RUNNER: ${{ runner.name }}
+          BROKER_SHA: ${{ inputs.broker_sha }}
         run: |
           test "$SELECTED_RUNNER" = th-server-1
-          python3 deploy/storage-reconnect.py
+          args=()
+          if [ -n "$BROKER_SHA" ]; then args+=(--broker-sha "$BROKER_SHA"); fi
+          python3 deploy/storage-reconnect.py "${args[@]}"
       - name: Verify access and independent services
         if: always()
         run: |
