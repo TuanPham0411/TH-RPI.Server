@@ -1,11 +1,12 @@
-import {readFile} from 'node:fs/promises';
+import {readFile,lstat} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {tokenSupplier} from '../storage/oauth.mjs';
 import {GoogleDriveTransport} from '../storage/google-drive.mjs';
 import {Coordinator} from '../storage/coordinator.mjs';
 import {verifiedDownloader} from './recovery-files.mjs';
 
 try{
- const input=JSON.parse(await readFile(0,'utf8'));
+ const input=JSON.parse(readFileSync(0,'utf8'));
  const config=JSON.parse(await readFile('/config/runtime.json','utf8'));
  const root=JSON.parse(await readFile('/state/drive-root.json','utf8'));
  const token=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
@@ -27,7 +28,9 @@ try{
  let restored=0,reused=0;
  const download=verifiedDownloader({root:'/cache/files',fetchReference:file=>transport.request('files/'+encodeURIComponent(file.id)+'?alt=media'),onFile:result=>{if(result.reused)reused++;else restored++;}});
  for(const file of references.values())await download(file);
- console.log(JSON.stringify({photosRecords:input.photos.length,verifiedArchiveMatches:references.size,restoredFromDrive:restored,alreadyPresent:reused,requiresPicker:input.photos.length-references.size}));
+ let missing=0;
+ for(const row of input.photos){try{const info=await lstat('/cache/files/portfolio/'+row.id);if(!info.isFile()||info.size!==Number(row.size))missing++;}catch(error){if(error.code==='ENOENT')missing++;else throw error;}}
+ console.log(JSON.stringify({photosRecords:input.photos.length,verifiedArchiveMatches:references.size,restoredFromDrive:restored,alreadyPresent:reused,missingPhotosCaches:missing}));
 }catch(error){
  console.error('Archived photo recovery stopped; existing files and database retained');
  process.exitCode=1;
