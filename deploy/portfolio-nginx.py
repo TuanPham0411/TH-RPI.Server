@@ -13,8 +13,11 @@ BACKUP = pathlib.Path('/backup/portfolio-route.json')
 
 
 def host(*args):
-    subprocess.run(['chroot', str(ROOT), *args], check=True, capture_output=True,
-                   env={**os.environ, 'SYSTEMD_IGNORE_CHROOT': '1'}, timeout=30)
+    result = subprocess.run(['chroot', str(ROOT), *args], capture_output=True,
+                            env={**os.environ, 'SYSTEMD_IGNORE_CHROOT': '1'}, timeout=30)
+    if result.returncode:
+        # Outer recovery runner retains this privately, never in Actions logs.
+        raise RuntimeError(result.stderr.decode(errors='replace'))
 
 
 def restore():
