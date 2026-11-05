@@ -73,6 +73,21 @@ jobs:
               print(json.dumps({'brokerStatusEndpoint':True,'connected':value.get('connected')}))
           except Exception as error:
               print(json.dumps({'brokerStatusEndpoint':False,'reason':str(error) if isinstance(error,RuntimeError) else type(error).__name__}))
+          stats=subprocess.run(['docker','stats','--no-stream','--format','{{json .}}','th-platform-storage-1'],capture_output=True,text=True)
+          if stats.returncode==0:
+              row=json.loads(stats.stdout);print(json.dumps({'brokerResources':{key:row.get(key) for key in ('CPUPerc','MemUsage','NetIO','PIDs')}}))
+          identity=subprocess.run(['docker','exec','th-platform-storage-1','id','-u'],capture_output=True,text=True)
+          print(json.dumps({'brokerUid':identity.stdout.strip() if identity.returncode==0 else 'unavailable'}))
+          for app in ('ai-agent','portfolio','ticket','server'):
+              path=module.HOME/'state'/(app+'.json')
+              try:
+                  import time
+                  cache=json.loads(path.read_text());files=cache.get('files',{})
+                  print(json.dumps({'index':app,'ageSeconds':round(time.time()-path.stat().st_mtime),'files':len(files),'bytes':sum(int(value.get('size',0)) for value in files.values())}))
+              except (OSError,ValueError,TypeError):print(json.dumps({'index':app,'readable':False}))
+          mounts=subprocess.run(['docker','inspect','--format','{{json .Mounts}}','th-platform-storage-1'],capture_output=True,text=True)
+          if mounts.returncode==0:
+              print(json.dumps({'brokerMounts':[{'source':row['Source'],'destination':row['Destination']} for row in json.loads(mounts.stdout)]}))
           state=pathlib.Path.home()/'th-platform/state/portfolio-recovery'
           for name in ('definition.json','progress.json','last-command-error.log'):
               print(json.dumps({'privateRecoveryFile':name,'exists':(state/name).is_file()}))
