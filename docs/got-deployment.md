@@ -22,6 +22,6 @@ No other application's token is substituted for this user consent.
 
 ## Learning Garden and display copies
 
-The learning release is `ec418a628a156494284fa1b53e029c097a6bdbd1`. It adds four age profiles, guidance for all 18 games, age-based mechanics and a bounded, regenerable display cache in the existing data volume. Original images stay on Drive; do not reimport or replace the verified canonical set.
+The learning release is `675f414f6c92e812e67afba3edf414344dc4fbdc`. It adds four age profiles, guidance for all 18 games, age-based mechanics and a bounded, regenerable display cache in the existing data volume. Original images stay on Drive; do not reimport or replace the verified canonical set.
 
 After deploying the pinned image, run **Warm and verify GoT display cache** on the management runner. `per_topic=12` prepares initial cards; `per_topic=1200` walks all topic cards and the complete 1,274-file canonical inventory. The workflow verifies repeat HTTP requests are local cache hits, reports actual disk bytes and checks existing services. It never edits Drive files. Large warmups run sequentially to limit load on the Pi. Normal requests also create display copies on demand; new Drive versions replace the mapping on the next check (60 seconds).

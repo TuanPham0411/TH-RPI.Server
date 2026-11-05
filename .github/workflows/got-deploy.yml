@@ -9,7 +9,7 @@ on:
       image_sha:
         description: Immutable published TH-GoT image/source SHA
         type: string
-        default: ec418a628a156494284fa1b53e029c097a6bdbd1
+        default: 675f414f6c92e812e67afba3edf414344dc4fbdc
 permissions: {contents: read, packages: read}
 concurrency: {group: got-th-server-1, cancel-in-progress: false}
 jobs:
