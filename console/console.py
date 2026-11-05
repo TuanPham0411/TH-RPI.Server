@@ -2,7 +2,12 @@
 """TH-Server physical HDMI console. No HTTP listener or arbitrary command input."""
 import argparse, concurrent.futures, curses, datetime, json, os, pathlib, re, shutil, socket, subprocess, threading, time, urllib.request
 HOME = pathlib.Path('/home/thadmin/th-platform')
-APPS = [('Portfolio',8080,'th.io.vn'),('AI.Agent',8081,'ai.th.io.vn'),('TH-Ticket',8082,'ticket.th.io.vn')]
+APPS = [
+    ('Portfolio', 8080, 'th.io.vn'),
+    ('TH-Ticket', 8082, 'ticket.th.io.vn'),
+    ('GoT', 5082, 'got.th.io.vn'),
+    ('ESP XiaoZhi', 5081, 'esp.th.io.vn'),
+]
 SERVICES = ['docker','nginx','tailscaled','cloudflared']
 
 def command(args, timeout=8):
@@ -73,13 +78,25 @@ def usb_action(device, detach=False):
         print('Mounted:',target,'\nExisting files were preserved. This does not relocate application databases.')
 
 def health(app):
-    name,port,host=app
+    name, port, host = app
     try:
-        request=urllib.request.Request(f'http://127.0.0.1:{port}/api/'+('ready' if port==8081 else 'health'),headers={'Host':host})
-        with urllib.request.urlopen(request,timeout=3) as response:
-            value=json.load(response);good=response.status==200 and (value.get('ok') is True or value.get('status')=='ready')
+        if port in (5081, 5082):
+            path = '/healthz'
+        else:
+            path = '/api/' + ('ready' if port == 8081 else 'health')
+
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{port}{path}',
+            headers={'Host': host},
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            value = json.load(response)
+            good = response.status == 200 and (
+                value.get('ok') is True or value.get('status') == 'ready'
+            )
         return name, 'HEALTHY' if good else 'NOT READY'
-    except Exception: return name,'UNREACHABLE'
+    except Exception:
+        return name, 'UNREACHABLE'
 
 def snapshot():
     memory={}
