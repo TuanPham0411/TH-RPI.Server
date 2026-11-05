@@ -147,6 +147,19 @@ def validate_restored_counts(query):
     return result
 
 
+def wait_for_database(password):
+    database_environment={**os.environ,'PGPASSWORD':password}
+    for attempt in range(60):
+        # Docker's initdb temporary server accepts Unix connections before it
+        # shuts down. TCP is available only on the final PostgreSQL process.
+        probe=subprocess.run(['docker','exec','-e','PGPASSWORD','portfolio-database-1',
+                              'psql','-X','-h','127.0.0.1','-U','postgres','-d','th_portfolio',
+                              '-Atc','SELECT 1'],env=database_environment,capture_output=True)
+        if probe.returncode==0 and probe.stdout.strip()==b'1':break
+        time.sleep(2)
+    else:raise RuntimeError('Recovery database did not accept an authenticated TCP connection')
+
+
 def restore_portfolio(source):
     config=json.loads((HOME/'config/runtime.json').read_text())
     definition=json.loads((HOME/'state/portfolio-recovery/definition.json').read_text())
@@ -180,16 +193,7 @@ def restore_portfolio(source):
     guard.write_text('Portfolio recovery in progress\n')
     run(command+['stop','portfolio'])
     run(command+['up','-d','--no-build','database'])
-    database_environment={**os.environ,'PGPASSWORD':values['POSTGRES_PASSWORD']}
-    for attempt in range(60):
-        # Docker's initdb temporary server accepts Unix connections before it
-        # shuts down. TCP is available only on the final PostgreSQL process.
-        probe=subprocess.run(['docker','exec','-e','PGPASSWORD','portfolio-database-1',
-                              'psql','-X','-h','127.0.0.1','-U','postgres','-d','th_portfolio',
-                              '-Atc','SELECT 1'],env=database_environment,capture_output=True)
-        if probe.returncode==0 and probe.stdout.strip()==b'1':break
-        time.sleep(2)
-    else:raise RuntimeError('Recovery database did not accept an authenticated TCP connection')
+    wait_for_database(values['POSTGRES_PASSWORD'])
     def query(sql):
         return run(['docker','exec','-i','portfolio-database-1','psql','-X','-v','ON_ERROR_STOP=1','-U','postgres','-d','th_portfolio','-At'],input=sql.encode())
     progress=HOME/'state/portfolio-recovery/progress.json'
