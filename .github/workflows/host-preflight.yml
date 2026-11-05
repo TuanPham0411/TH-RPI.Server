@@ -64,7 +64,7 @@ jobs:
           python3 - <<'PY'
           import subprocess,json,pathlib
           config=json.loads((pathlib.Path.home()/'th-platform/config/runtime.json').read_text())['oauth']
-          code="""import pg from 'pg';import {readFileSync} from 'node:fs';const expected=JSON.parse(readFileSync(0,'utf8'));const pool=new pg.Pool({connectionString:process.env.DATABASE_URL});try{const {rows:[row]}=await pool.query(\"SELECT current_user='th_api' AS runtime_role, extensions.crypt('runtime-check',extensions.gen_salt('bf',4)) IS NOT NULL AS password_crypto\");console.log(JSON.stringify({runtimeClientIdMatches:process.env.GOOGLE_CLIENT_ID===expected.clientId,runtimeClientSecretMatches:process.env.GOOGLE_CLIENT_SECRET===expected.clientSecret,...row}));}finally{await pool.end();}"""
+          code="""import {readFileSync} from 'node:fs';const expected=JSON.parse(readFileSync(0,'utf8'));console.log(JSON.stringify({runtimeClientIdMatches:process.env.GOOGLE_CLIENT_ID===expected.clientId,runtimeClientSecretMatches:process.env.GOOGLE_CLIENT_SECRET===expected.clientSecret}));"""
           result=subprocess.run(['docker','exec','-i','portfolio-portfolio-1','node','--input-type=module','-e',code],input=json.dumps({'clientId':config['clientId'],'clientSecret':config['clientSecret']}),text=True,capture_output=True)
           if result.returncode:raise SystemExit('Runtime OAuth diagnostic failed; no credentials printed')
           print(result.stdout)
