@@ -39,3 +39,20 @@ verified. Log descriptor snapshots and bounded parallel reads reduce repeated
 Drive metadata calls; startup cache replay remains ordered, verifies every event
 checksum/decryption and checkpoints once per application instead of rewriting the
 whole mapping file after every historical operation.
+
+## Resume after a workflow interruption
+
+The recovery operator image prefetches authenticated journal packets with bounded
+parallelism and keeps the original ordered replay, migration, before-image and
+foreign-key checks. Media references come only from those verified packets. It
+uses the retained owner authorization to read each referenced Drive object once,
+checks size and SHA-256, and publishes the file exclusively. An existing file is
+reused only after its complete checksum is verified; mismatches are preserved and
+stop recovery. Symlink/traversal destinations are rejected.
+
+Before resuming, the workflow stops only Portfolio migration containers whose
+command identifies the interrupted recovery operator. An existing initialized
+schema can be reused only while all business tables are empty and its Drive head
+is unacknowledged. No schema/table/volume is dropped. Already acknowledged or
+nonempty databases are refused for operator review. This avoids erasing data or
+re-downloading verified media simply to recover from a cancelled job.
