@@ -1,0 +1,18 @@
+name: Deploy ESP32 with management runner
+on:
+  workflow_dispatch:
+permissions: {contents: read, packages: read}
+concurrency: {group: esp32-th-server-1, cancel-in-progress: false}
+jobs:
+  inspect:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - name: Inspect ESP32 deployment prerequisites
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          python3 deploy/esp32-deploy.py
