@@ -30,11 +30,26 @@ try{
  let restored=0,reused=0;
  phase='restore-verified-files';
  console.log(JSON.stringify({archiveMatches:references.size}));
- const download=verifiedDownloader({root:'/cache/files',fetchReference:file=>transport.request('files/'+encodeURIComponent(file.id)+'?alt=media'),onFile:result=>{if(result.reused)reused++;else restored++;}});
- for(const file of references.values())await download(file);
+ const download=verifiedDownloader({root:'/cache/files',fetchReference:async file=>{
+  try{return await transport.request('files/'+encodeURIComponent(file.id)+'?alt=media');}
+  catch(error){
+   if(!String(error.message).includes('Drive request failed (404)'))throw error;
+   // Drive IDs can become stale after an archive copy. The authenticated,
+   // content-addressed key plus SHA-256 still identifies the same bytes.
+   if(typeof file.key!=='string'||!file.key.startsWith('portfolio/')||!file.key.endsWith('/'+file.sha256))throw error;
+   const current=await transport.metadata(file.key);
+   if(!current.file)throw error;
+   return transport.request('files/'+encodeURIComponent(current.file.id)+'?alt=media');
+  }
+ },onFile:result=>{if(result.reused)reused++;else restored++;}});
+ let unavailable=0;
+ for(const file of references.values()){
+  try{await download(file);}
+  catch(error){if(String(error.message).includes('Drive request failed (404)'))unavailable++;else throw error;}
+ }
  let missing=0;
  for(const row of input.photos){try{const info=await lstat('/cache/files/portfolio/'+row.id);if(!info.isFile()||info.size!==Number(row.size))missing++;}catch(error){if(error.code==='ENOENT')missing++;else throw error;}}
- console.log(JSON.stringify({photosRecords:input.photos.length,verifiedArchiveMatches:references.size,restoredFromDrive:restored,alreadyPresent:reused,missingPhotosCaches:missing}));
+ console.log(JSON.stringify({photosRecords:input.photos.length,verifiedArchiveMatches:references.size,restoredFromDrive:restored,alreadyPresent:reused,archiveFilesUnavailable:unavailable,missingPhotosCaches:missing}));
 }catch(error){
  const known=['Invalid verified recovery reference','Existing recovery file','Recovery media checksum differs','Recovery media size differs','Missing or corrupt event','Invalid event identity','Drive OAuth refresh failed','Authenticated Drive owner differs','Database head is absent'];
  const provider=String(error.message).match(/Drive request failed \((\d+)\) \[([a-zA-Z,]+)\]/);
