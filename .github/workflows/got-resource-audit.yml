@@ -1,0 +1,59 @@
+name: Audit original GoT resources on Drive
+on:
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 10
+    steps:
+      - name: Audit canonical image fingerprints and resource documents without modifying Drive
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          test "$SELECTED_RUNNER" = th-server-1
+          docker exec -i th-got-web-1 python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          from app import app
+          from drive_store import store,DriveMissing
+          from drive_migration import ARCHIVE_ID,MARKER
+          with app.app_context():
+              drive=store()
+              lock=json.loads(Path(app.config['DRIVE_ARCHIVE_LOCK']).read_text())
+              root=Path(app.config['RESOURCE_ROOT'])
+              expected={hashlib.sha256(path.encode()).hexdigest():path for path in lock['files']}
+              documents={'resource/'+path.name:json.loads(path.read_text()) for path in root.glob('*.json')}
+              expected.update({hashlib.sha256(path.encode()).hexdigest():path for path in documents})
+              found={};duplicates=[];page=''
+              query="trashed=false and ('"+drive.folder+"' in parents or appProperties has { key='gotRoot' and value='"+drive.folder+"' })"
+              while True:
+                  data=json.loads(drive.call('GET','files',q=query,pageSize=1000,pageToken=page,fields='nextPageToken,files(id,mimeType,appProperties,size,sha256Checksum,md5Checksum)'))
+                  for entry in data.get('files',[]):
+                      path=expected.get(entry.get('appProperties',{}).get('gotPathHash'))
+                      if not path:continue
+                      if path in found:duplicates.append(path)
+                      found[path]=entry
+                  page=data.get('nextPageToken')
+                  if not page:break
+              missing=[];changed=[];verified=0;unknown=0
+              for path,wanted in lock['files'].items():
+                  actual=found.get(path)
+                  if not actual:missing.append(path);continue
+                  if int(actual.get('size',-1))!=wanted['bytes']:changed.append(path);continue
+                  digest=actual.get('sha256Checksum')
+                  if not digest:unknown+=1
+                  elif digest!=wanted['sha256']:changed.append(path)
+                  else:verified+=1
+              missing_docs=[];changed_docs=[]
+              for path,wanted in documents.items():
+                  entry=found.get(path)
+                  if not entry:missing_docs.append(path);continue
+                  actual=json.loads(drive.call('GET','files/'+entry['id'],alt='media'))
+                  if actual!=wanted:changed_docs.append(path)
+              try:
+                  marker=drive.document(MARKER)
+                  marker_valid=marker.get('schema')==1 and marker.get('archive_sha256')==lock['sha256'] and marker.get('initial_images')==len(lock['files'])
+              except DriveMissing:marker_valid=False
+              print(json.dumps({'canonicalImages':len(lock['files']),'verifiedImages':verified,'missingImages':len(missing),'changedImages':len(changed),'imagesWithoutServerSha256':unknown,'duplicatePaths':duplicates[:15],'canonicalDocuments':len(documents),'missingDocuments':missing_docs,'changedDocuments':changed_docs,'markerValid':marker_valid,'missingImageExamples':missing[:15],'changedImageExamples':changed[:15]},ensure_ascii=False))
+          PY
