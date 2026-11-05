@@ -1,0 +1,27 @@
+name: Recover Portfolio from retained Drive storage
+on:
+  workflow_dispatch:
+permissions: {contents: read, packages: read}
+concurrency:
+  group: portfolio-recovery-th-server-1
+  cancel-in-progress: false
+jobs:
+  recover:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 40
+    env:
+      DOCKER_CONFIG: /tmp/th-portfolio-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check management runner
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: test "$SELECTED_RUNNER" = th-server-1
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reconnect storage and inspect recovery metadata
+        run: python3 deploy/portfolio-recovery.py --source "$GITHUB_WORKSPACE"
