@@ -64,6 +64,8 @@ jobs:
           docker exec -i th-platform-storage-1 node --input-type=module <<'JS'
           import {readFile} from 'node:fs/promises';
           import {tokenSupplier} from './storage/oauth.mjs';
+          import {GoogleDriveTransport} from './storage/google-drive.mjs';
+          import {Coordinator} from './storage/coordinator.mjs';
           try {
             const config=JSON.parse(await readFile('/config/runtime.json','utf8'));
             const token=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
@@ -80,5 +82,19 @@ jobs:
             const rootResponse=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(root.folderId)+'?fields=capabilities(canAddChildren)',{headers:{Authorization:'Bearer '+await token()},signal:AbortSignal.timeout(30000)});
             const permissions=await rootResponse.json();
             console.log(JSON.stringify({driveFolderPermissionStatus:rootResponse.status,canAddChildren:permissions.capabilities?.canAddChildren,reasons:(permissions.error?.errors||[]).map(x=>x.reason)}));
+            const transport=new GoogleDriveTransport({rootId:root.folderId,accessToken:token,fetchImpl:async(...args)=>{
+              const response=await fetch(...args);
+              if(!response.ok){
+                const body=await response.clone().json().catch(()=>({}));
+                console.log(JSON.stringify({driveReadFailureStatus:response.status,reasons:(body.error?.errors||[]).map(x=>x.reason),status:body.error?.status}));
+              }
+              return response;
+            }});
+            const coordinator=new Coordinator({transport,wrappingSecret:config.oauth.clientSecret});
+            const history=await coordinator.history('portfolio');
+            console.log(JSON.stringify({verifiedHistory:history.length}));
+            await transport.list('portfolio/events/');
+            for(let offset=0;offset<history.length;offset+=4){await Promise.all(history.slice(offset,offset+4).map(marker=>coordinator.event('portfolio',marker)));}
+            console.log(JSON.stringify({verifiedEvents:history.length}));
           } catch(error) { console.log(JSON.stringify({driveProbeFailed:true,type:error.name})); }
           JS
