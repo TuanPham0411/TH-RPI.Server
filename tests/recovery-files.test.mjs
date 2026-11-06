@@ -41,3 +41,10 @@ test('prefetched journal remains ordered, bounded, and rejects writes or wrong i
  assert.equal(reads,9);await assert.rejects(cached('/v1/commit',{}),/read-only/);
  await assert.rejects(cachedJournal(async path=>path==='/v1/history'?{history:[{id:'one',parent:null}]}:{id:'other',parent:null,application:'portfolio'}),/identity differs/);
 });
+test('AI recovery journal accepts only the selected application identity',async()=>{
+ const marker={id:'one',parent:null};
+ const broker=async path=>path==='/v1/history'?{history:[marker]}:{...marker,application:'ai-agent',events:[],files:[]};
+ const journal=await cachedJournal(broker,{application:'ai-agent'});
+ assert.equal((await journal('/v1/event',{id:'one'})).application,'ai-agent');
+ await assert.rejects(cachedJournal(broker),/identity differs/);
+});
