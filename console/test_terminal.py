@@ -49,9 +49,15 @@ class TerminalTests(unittest.TestCase):
                     break
         return result
 
+    def ready(self, master):
+        result=b"";deadline=time.monotonic()+5
+        while b"CPU" not in result and time.monotonic()<deadline:
+            result+=self.output(master,.2)
+        return result
+
     def test_real_terminal_navigation_filter_detail_resize_and_clean_exit(self):
         proc, master = self.start()
-        out = self.output(master)
+        out = self.ready(master)
         self.assertIn(b"SIKA1", out)
         self.assertIn(b"CPU", out)
         os.write(master, b"6")
@@ -78,7 +84,7 @@ class TerminalTests(unittest.TestCase):
 
     def test_monochrome_terminal_still_has_explicit_status_labels(self):
         proc, master = self.start("vt100")
-        out = self.output(master)
+        out = self.ready(master)
         self.assertIn(b"SIKA1", out)
         os.write(master, b"6")
         out = self.output(master)
