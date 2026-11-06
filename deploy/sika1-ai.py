@@ -56,10 +56,10 @@ else:raise RuntimeError('Storage journal recovery has not completed')
 receipt=state/'ai-restored.json'
 if not receipt.exists():
     command(base+['run','--rm','--no-deps','migrate'])
-    command(base+['run','--rm','--no-deps','-v',str(pathlib.Path(__file__).with_name('prepare-ai-recovery.mjs').resolve())+':/app/prepare-ai-recovery.mjs:ro','-v',str(state/'ai-clone.json')+':/recovery/manifest.json:ro','migrate','node','/app/prepare-ai-recovery.mjs'])
     command(base+['run','--rm','--no-deps','migrate','node','server/storage-operator.js','install'])
+    command(base+['run','--rm','--no-deps','-v',str(pathlib.Path(__file__).with_name('prepare-ai-recovery.mjs').resolve())+':/app/prepare-ai-recovery.mjs:ro','-v',str(state/'ai-clone.json')+':/recovery/manifest.json:ro','migrate','node','/app/prepare-ai-recovery.mjs'])
     source=pathlib.Path(__file__).resolve().parents[1]
-    command(base+['run','--rm','--no-deps','-v',str(source/'storage')+':/app/storage:ro','-v',str(source/'deploy')+':/app/deploy:ro','-v',str(config)+':/config:ro','migrate','node','deploy/restore-ai.mjs'],timeout=3600)
+    command(base+['run','--rm','--no-deps','-v',str(source/'storage')+':/app/storage:ro','-v',str(source/'deploy')+':/app/deploy:ro','-v',str(config)+':/config:ro','migrate','node','deploy/restore-ai.mjs'],timeout=3600,stream=True)
     receipt.write_text(json.dumps({'head':cloned['head'],'release':a.ai_release,'restored':True}))
 else:
     if json.loads(receipt.read_text()).get('release')!=a.ai_release:raise RuntimeError('Existing installation requires a separate upgrade, retained unchanged')
