@@ -4,7 +4,7 @@ import http.client,json,pathlib,socket,sys
 base=pathlib.Path('/host/home/thadmin/th-platform')
 config=json.loads((base/'config/runtime.json').read_text())
 if sys.argv[1]=='credentials':
-    payload={'oauth':config['oauth'],'drive':json.loads((base/'config/drive-credentials.json').read_text())}
+    payload={'sourceRootId':json.loads((base/'state/drive-root.json').read_text())['folderId'],'oauth':config['oauth'],'drive':json.loads((base/'config/drive-credentials.json').read_text())}
     sa=base/'config/ai-studio/firebase-service-account.ai-agent-67316.json'
     if sa.is_file():payload['firebase']=json.loads(sa.read_text())
     sys.stdout.write(json.dumps(payload))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fixed SSH forced command: receive AI bootstrap privately, never execute input."""
-import json,os,pathlib,secrets,sys
+import json,os,pathlib,re,secrets,sys
 os.umask(0o077)
 root=pathlib.Path.home()/'th-platform'
 config=root/'config'
@@ -12,7 +12,8 @@ value=json.loads(raw)
 oauth=value['oauth'];drive=value['drive']
 if oauth.get('expectedEmail','').lower()!='eric.scorp93@gmail.com' or drive.get('email','').lower()!=oauth['expectedEmail'].lower():raise SystemExit('Recovery owner differs')
 if not all(isinstance(oauth.get(k),str) and oauth[k] for k in ['clientId','clientSecret','expectedEmail']) or not drive.get('refreshToken'):raise SystemExit('Incomplete recovery authorization')
-runtime={'oauth':oauth,'tokens':{'ai-agent':secrets.token_hex(32),'server':secrets.token_hex(32)},'driveRootName':'th-data-sika1-ai','origins':{'ai-agent':'https://thienha.io.vn'}}
+if not re.fullmatch(r'[\w-]+',value.get('sourceRootId','')):raise SystemExit('Invalid recovery root')
+runtime={'recoverySourceRoot':value['sourceRootId'],'oauth':oauth,'tokens':{'ai-agent':secrets.token_hex(32),'server':secrets.token_hex(32)},'driveRootName':'th-data-sika1-ai','origins':{'ai-agent':'https://thienha.io.vn'}}
 def write(name,data):
     path=config/name
     with path.open('x') as file:json.dump(data,file)

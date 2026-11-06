@@ -71,4 +71,5 @@ if __name__=='__main__':
  cleanup()
  RUN.mkdir(exist_ok=True);path=RUN/'automation.sock';path.unlink(missing_ok=True)
  server=Server(str(path),Handler);os.chmod(path,0o660)
- threading.Thread(target=ticks,daemon=True).start();print('TH-Server automation service ready',flush=True);server.serve_forever()
+ if os.environ.get('TH_AUTOMATION_TIMERS','1')=='1':threading.Thread(target=ticks,daemon=True).start()
+ print('TH-Server automation service ready; timers '+('enabled' if os.environ.get('TH_AUTOMATION_TIMERS','1')=='1' else 'paused'),flush=True);server.serve_forever()
