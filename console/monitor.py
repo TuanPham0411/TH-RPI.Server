@@ -9,6 +9,7 @@ import threading
 import time
 
 import inventory
+import telemetry
 
 STATE_PATH = pathlib.Path('/var/lib/th-server-console/inventory.json')
 
@@ -39,7 +40,8 @@ def sample(previous=None):
         if before:
             current[source] = before.get(source, [])
     return {'at': time.time(), 'inventory': current, 'known_sources':sorted(known),
-            'changes': (events + (previous['changes'] if previous else []))[:200]}
+            'changes': (events + (previous['changes'] if previous else []))[:200],
+            'host': telemetry.sample(previous.get('host') if previous else None)}
 
 
 def save(path, value):
@@ -67,11 +69,12 @@ def main():
         signal.signal(signum, lambda *_: stop.set())
     previous = load(args.state)
     while not stop.is_set():
+        started = time.monotonic()
         previous = sample(previous)
         save(args.state, previous)
         if args.once:
             return
-        stop.wait(args.interval)
+        stop.wait(max(0, args.interval - (time.monotonic() - started)))
 
 
 if __name__ == '__main__':

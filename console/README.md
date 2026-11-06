@@ -40,7 +40,9 @@ của container, không ghi token/credential vào inventory.
 - `2`: mạng, gateway, DNS và Tailscale (khi đã cài).
 - `3`: tự tìm mọi runner systemd `actions.runner.*.service`.
 - `4`: USB; `5`: container và images; `6`: mọi host service; `7`: thay đổi.
-- `R`: refresh; mũi tên/J/K: cuộn; `Q`: thoát.
+- `8`: độ ổn định; `9`: hướng dẫn và cách hiểu trạng thái.
+- `/`: tìm tên ứng dụng/service; `C`: xóa tìm; `F`: tất cả/cần chú ý/đang chạy; `D`: chi tiết.
+- `R`: refresh; mũi tên/J/K/PgUp/PgDn/Home/End: cuộn; Tab hoặc trái/phải: chuyển trang; `Q`: thoát.
 - `N`: nmtui nếu có; `U`/`E`: mount/unmount USB đã có filesystem. Thao tác thay
   đổi cần xác nhận và sudo của người quản trị; không format hoặc di chuyển database.
 - `L`: chuyển tty2 trên console vật lý; SSH không chuyển virtual terminal.
@@ -176,3 +178,41 @@ on GitHub, and only the install job runs on the Pi. Monitor and SSH console need
 no application OAuth or storage-broker credentials; those are separate services.
 HDMI runs on tty1; an existing graphical session is preserved and can be switched
 with Ctrl+Alt+F1 locally. SSH usage after deployment: `sudo th-server`.
+
+
+## Dashboard và độ ổn định
+
+Header luôn có hostname, IP LAN/VPN, uptime và tuổi mẫu. Điều hướng tách phần
+**theo dõi** khỏi **vận hành**. Tổng quan có thanh CPU/RAM/SD, nhiệt độ, swap,
+DNS/HTTPS và số ứng dụng/service cần xem. Services được sắp lỗi lên đầu; có state,
+substate, enabled/masked, PID, NRestarts và thời gian active. Container hiển thị
+HEALTHCHECK, exit code, restart count, Compose và image; mở chi tiết để xem
+image ID/digest và port. Danh sách vẫn tự phát hiện, không cần allowlist.
+
+Màu xanh = trạng thái OK được đo; vàng = chuyển trạng thái/cần kiểm tra;
+đỏ = failed/unhealthy/exit lỗi; xám = chưa đo hoặc không hoạt động;
+xanh cyan = thông tin/chạy nhưng chưa có healthcheck. Trạng thái luôn có nhãn
+chữ, dùng được cả terminal đơn sắc. Inactive/disabled/masked/template không tự
+động là lỗi; oneshot active/exited được ghi “HOAN TAT”. Tên có chữ “failed”
+không làm service bị tô đỏ. Văn bản giao diện dùng ASCII tiếng Việt không dấu
+để đọc được trên font TTY/HDMI; dữ liệu được lọc ký tự điều khiển terminal.
+
+Monitor dùng cùng dữ liệu cho HDMI và các phiên SSH; refresh mục tiêu 5 giây,
+phụ thuộc thời gian đọc hệ thống. RX/TX theo delta bộ đếm; lần đầu hoặc counter
+reset hiển thị chưa đo. Cứ khoảng 30 giây, monitor kiểm tra gateway ICMP (nếu có
+ping), DNS qua resolver máy và HTTPS `https://www.google.com/generate_204` với
+TLS verification và timeout hữu hạn. Không gửi credential/cookie, không đổi
+network config. Chặn ICMP không được suy diễn thành mất Internet. Khi công cụ
+hoặc route không đọc được, báo chưa xác định. Public HTTPS chỉ kiểm tra một đích,
+không đại diện mọi website hoặc health của ứng dụng.
+
+Trang 8 giữ tối đa 121 probe trong cửa sổ một giờ, tỷ lệ probe HTTPS thành công,
+độ trễ của probe thành công, số chuyển OK/FAIL và khoảng thiếu mẫu. Mẫu unknown
+không vào mẫu số; không suy diễn uptime giữa hai lần đo hoặc khi monitor dừng.
+Lịch sử lưu cùng inventory qua restart; boot ID đổi tăng số reboot đã quan sát.
+`vcgencmd get_throttled`, nếu có, phân biệt cờ sut áp/throttle hiện tại và lịch sử
+trong boot. Chưa đọc được không được coi là nguồn/nhiệt bình thường.
+
+Có thể kiểm tra read-only bằng `th-server --snapshot`: trường `host` chứa
+telemetry và probe/history; `inventory` và `changes` giữ API trước đó. Không mở
+HTTP listener và không tự động restart app hay service.
