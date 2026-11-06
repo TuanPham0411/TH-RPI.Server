@@ -6,6 +6,10 @@ on:
         type: choice
         options: [clone, restore]
         default: clone
+      platform_release:
+        description: Tested immutable storage image release
+        required: true
+        default: 21a05db76a82b2374a313b0fce8243dde02c0e1a
       ai_release:
         description: Tested immutable AI image release
         required: true
@@ -19,7 +23,7 @@ jobs:
     env:
       AI_RELEASE: ${{ inputs.ai_release }}
       PHASE: ${{ inputs.phase }}
-      PLATFORM_RELEASE: ${{ github.sha }}
+      PLATFORM_RELEASE: ${{ inputs.platform_release }}
       DOCKER_CONFIG: /tmp/th-ai-registry-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v5
