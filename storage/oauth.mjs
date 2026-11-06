@@ -23,13 +23,14 @@ export function tokenSupplier({credentialsPath,clientId,clientSecret,expectedEma
  return supply;
 }
 
-export async function ensureRoot(accessToken,fetchImpl=fetch){
+export async function ensureRoot(accessToken,fetchImpl=fetch,rootName='th-data'){
+ if(!/^[a-zA-Z0-9_-]{1,80}$/.test(rootName))throw Error('Invalid Drive root name');
  const token=await accessToken();
- const q=new URLSearchParams({q:"'root' in parents and trashed = false and name = 'th-data' and mimeType = 'application/vnd.google-apps.folder'",fields:'files(id,name),nextPageToken',pageSize:'1000'});
+ const q=new URLSearchParams({q:`'root' in parents and trashed = false and name = '${rootName}' and mimeType = 'application/vnd.google-apps.folder'`,fields:'files(id,name),nextPageToken',pageSize:'1000'});
  const response=await fetchImpl(`https://www.googleapis.com/drive/v3/files?${q}`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(30000)});
  if(!response.ok)throw Error('Cannot locate th-data');const list=await response.json();
  if(list.nextPageToken||list.files.length>1)throw Error('Ambiguous th-data folders; choose one before proceeding');
  if(list.files.length)return list.files[0].id;
- const created=await fetchImpl('https://www.googleapis.com/drive/v3/files?fields=id',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({name:'th-data',mimeType:'application/vnd.google-apps.folder',parents:['root'],appProperties:{thStorage:'v1'}}),signal:AbortSignal.timeout(30000)});
+ const created=await fetchImpl('https://www.googleapis.com/drive/v3/files?fields=id',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({name:rootName,mimeType:'application/vnd.google-apps.folder',parents:['root'],appProperties:{thStorage:'v1'}}),signal:AbortSignal.timeout(30000)});
  if(!created.ok)throw Error('Cannot create th-data');return (await created.json()).id;
 }

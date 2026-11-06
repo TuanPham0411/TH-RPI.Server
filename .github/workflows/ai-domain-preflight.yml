@@ -10,7 +10,7 @@ permissions: {contents: read}
 jobs:
   inspect:
     runs-on: ["${{ inputs.target == 'th-server-2' && 'th-server-2' || 'th-server-bootstrap' }}"]
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with: {persist-credentials: false}
@@ -26,3 +26,6 @@ jobs:
           docker volume ls --format '{{.Name}}'
           ss -ltn '( sport = :80 or sport = :5000 or sport = :5050 or sport = :8081 or sport = :3100 )'
           systemctl is-active ssh NetworkManager tailscaled cloudflared docker
+      - name: Inspect recoverable AI baseline without exposing records
+        if: inputs.target == 'th-server-1'
+        run: docker run --rm --network none --read-only --user 0 --cap-drop ALL --cap-add DAC_OVERRIDE --mount type=bind,src=/,dst=/host,readonly --mount "type=bind,src=$GITHUB_WORKSPACE/deploy/ai-recovery-source.py,dst=/inspect.py,readonly" --entrypoint python3 ghcr.io/tuanpham0411/th-rpi-console:0dab2b0a6e61b26c9fb345d89503ac57f1301597 /inspect.py manifest

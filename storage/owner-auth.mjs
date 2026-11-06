@@ -1,8 +1,7 @@
 import {randomBytes,createHash} from 'node:crypto';
 const digest=value=>createHash('sha256').update(value).digest('hex');
-const redirect='https://ai.th.io.vn/api/oauth/callback';
 export class OwnerAuth {
- constructor({oauth,save,records=[],fetchImpl=fetch,now=()=>Date.now()}){this.oauth=oauth;this.save=save;this.fetch=fetchImpl;this.now=now;this.pending=new Map();this.sessions=new Map();for(const row of records)this.apply(row);}
+ constructor({oauth,save,origin='https://ai.th.io.vn',records=[],fetchImpl=fetch,now=()=>Date.now()}){const url=new URL(origin);if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw Error('Invalid AI origin');this.redirect=url.origin+'/api/oauth/callback';this.oauth=oauth;this.save=save;this.fetch=fetchImpl;this.now=now;this.pending=new Map();this.sessions=new Map();for(const row of records)this.apply(row);}
  apply(row){if(row.kind==='owner-session'&&row.application==='ai-agent')this.sessions.set(row.hash,row);if(row.kind==='owner-revocation')this.sessions.delete(row.hash);}
  start(binding){
   if(typeof binding!=='string'||!/^[a-f0-9]{64}$/.test(binding))throw Error('Browser binding required');
@@ -10,12 +9,12 @@ export class OwnerAuth {
   if(this.pending.size>=100)throw Error('Too many sign-in attempts');
   const state=randomBytes(32).toString('hex'),verifier=randomBytes(32).toString('base64url');
   this.pending.set(state,{binding,verifier,expires:this.now()+600000});
-  return {url:'https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:this.oauth.clientId,redirect_uri:redirect,response_type:'code',scope:'openid email',state,code_challenge:digestBuffer(verifier),code_challenge_method:'S256'})};
+  return {url:'https://accounts.google.com/o/oauth2/v2/auth?'+new URLSearchParams({client_id:this.oauth.clientId,redirect_uri:this.redirect,response_type:'code',scope:'openid email',state,code_challenge:digestBuffer(verifier),code_challenge_method:'S256'})};
  }
  async callback({state,code,binding}){
   const pending=this.pending.get(state);this.pending.delete(state);
   if(!pending||pending.binding!==binding||pending.expires<this.now()||typeof code!=='string'||code.length>4096)throw Error('Invalid sign-in state');
-  const response=await this.fetch('https://oauth2.googleapis.com/token',{method:'POST',body:new URLSearchParams({client_id:this.oauth.clientId,client_secret:this.oauth.clientSecret,redirect_uri:redirect,grant_type:'authorization_code',code,code_verifier:pending.verifier}),signal:AbortSignal.timeout(30000)});
+  const response=await this.fetch('https://oauth2.googleapis.com/token',{method:'POST',body:new URLSearchParams({client_id:this.oauth.clientId,client_secret:this.oauth.clientSecret,redirect_uri:this.redirect,grant_type:'authorization_code',code,code_verifier:pending.verifier}),signal:AbortSignal.timeout(30000)});
   if(!response.ok)throw Error('Google sign-in failed');const token=await response.json();
   if(!token.access_token)throw Error('Google access token missing');
   const identityResponse=await this.fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token.access_token},signal:AbortSignal.timeout(20000)});

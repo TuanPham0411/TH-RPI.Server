@@ -1,0 +1,40 @@
+name: Restore and deploy AI Studio on SIKA1
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [clone, restore]
+        default: clone
+      ai_release:
+        description: Tested immutable AI image release
+        required: true
+        default: 4a40baacf5fb2f4e48c31023b49ff5d642e4f87f
+permissions: {contents: read, packages: read}
+concurrency: {group: ai-sika1-deployment, cancel-in-progress: false}
+jobs:
+  deploy:
+    runs-on: [th-server-2]
+    timeout-minutes: 90
+    env:
+      AI_RELEASE: ${{ inputs.ai_release }}
+      PHASE: ${{ inputs.phase }}
+      PLATFORM_RELEASE: ${{ github.sha }}
+      DOCKER_CONFIG: /tmp/th-ai-registry-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - uses: actions/checkout@v5
+        with:
+          repository: TuanPham0411/TH-AI.Agent
+          ref: ${{ inputs.ai_release }}
+          path: ai-source
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recover immutable AI data and deploy only after verification
+        run: python3 deploy/sika1-ai.py "$PHASE" --platform-release "$PLATFORM_RELEASE" --ai-release "$AI_RELEASE" --ai-source ai-source

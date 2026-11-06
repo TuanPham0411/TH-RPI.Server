@@ -1,0 +1,59 @@
+name: Transfer AI recovery authorization privately to SIKA1
+on: workflow_dispatch
+permissions: {contents: read}
+concurrency: {group: ai-sika1-recovery-transfer, cancel-in-progress: false}
+jobs:
+  source:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-1
+      - run: python3 deploy/ai-private-transfer.py source-key
+      - uses: actions/upload-artifact@v4
+        with: {name: ai-source-public-key, path: ai-public-relay/source.pub, retention-days: 1}
+  target:
+    needs: source
+    runs-on: [th-server-2]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - uses: actions/download-artifact@v4
+        with: {name: ai-source-public-key, path: ai-public-relay}
+      - run: python3 deploy/ai-private-transfer.py target-key
+      - uses: actions/upload-artifact@v4
+        with: {name: ai-target-public-host-key, path: ai-public-relay/target-host.pub, retention-days: 1}
+  send:
+    needs: target
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-1
+      - uses: actions/download-artifact@v4
+        with: {name: ai-target-public-host-key, path: ai-public-relay}
+      - run: python3 deploy/ai-private-transfer.py send
+  cleanup-source:
+    if: always()
+    needs: [source, target, send]
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-1
+      - run: python3 deploy/ai-private-transfer.py cleanup-source
+  cleanup-target:
+    if: always()
+    needs: [source, target, send]
+    runs-on: [th-server-2]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - run: python3 deploy/ai-private-transfer.py cleanup-target
