@@ -56,6 +56,7 @@ else:raise RuntimeError('Storage journal recovery has not completed')
 receipt=state/'ai-restored.json'
 if not receipt.exists():
     command(base+['run','--rm','--no-deps','migrate'])
+    command(base+['run','--rm','--no-deps','-v',str(pathlib.Path(__file__).with_name('prepare-ai-recovery.mjs').resolve())+':/app/prepare-ai-recovery.mjs:ro','-v',str(state/'ai-clone.json')+':/recovery/manifest.json:ro','migrate','node','/app/prepare-ai-recovery.mjs'])
     command(base+['run','--rm','--no-deps','migrate','node','server/storage-operator.js','install'])
     command(base+['run','--rm','--no-deps','migrate','node','server/storage-operator.js','restore-empty'],timeout=3600)
     receipt.write_text(json.dumps({'head':cloned['head'],'release':a.ai_release,'restored':True}))

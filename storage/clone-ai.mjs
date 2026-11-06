@@ -20,7 +20,7 @@ let baseline=null,completed=0;
 for(let offset=0;offset<history.length;offset+=4){
  await Promise.all(history.slice(offset,offset+4).map(async marker=>{
   const packet=await coordinator.event('ai-agent',marker);
-  if(packet.baseline&&(!baseline||history.indexOf(marker)>baseline.position))baseline={position:history.indexOf(marker),release:packet.baseline.release,tables:packet.baseline.tables.length,migrations:packet.baseline.migrations};
+  if(packet.baseline&&(!baseline||history.indexOf(marker)>baseline.position))baseline={position:history.indexOf(marker),release:packet.baseline.release,tables:packet.baseline.tables,migrations:packet.baseline.migrations};
   for(const part of ['events','commits']){
    const key=`ai-agent/${part}/${marker.id}.json`,file=source.readIndex.get(key);if(!file)throw Error('Missing source object');
    let copied=target.readIndex.get(key);
