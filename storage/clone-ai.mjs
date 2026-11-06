@@ -11,6 +11,7 @@ if(rootId===config.recoverySourceRoot)throw Error('Recovery root must differ');
 const source=new GoogleDriveTransport({rootId:config.recoverySourceRoot,accessToken:token});
 const target=new GoogleDriveTransport({rootId,accessToken:token});
 const coordinator=new Coordinator({transport:source,wrappingSecret:config.oauth.clientSecret});
+console.log(JSON.stringify({phase:'source-inventory',commits:(await source.list('ai-agent/commits/')).length}));
 const history=await coordinator.history('ai-agent');if(!history.length)throw Error('No AI history; refusing empty replacement');
 await source.list('ai-agent/events/');
 const existing=new Set(await target.list('ai-agent/commits/'));await target.list('ai-agent/events/');
