@@ -6,8 +6,8 @@ if socket.gethostname().upper()!='SIKA1' or os.getuid()!=1000 or pathlib.Path.ho
 if not all(re.fullmatch('[a-f0-9]{40}',sha) for sha in [a.platform_release,a.ai_release]):raise SystemExit('Immutable releases required')
 os.umask(0o077);home=pathlib.Path.home()/'th-platform';config=home/'config';state=home/'state';run=home/'run';release=home/'releases'/('ai-'+a.ai_release)
 for folder in [state,run,release,home/'apps']:folder.mkdir(parents=True,exist_ok=True,mode=0o700)
-def command(args,timeout=1800):
-    result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
+def command(args,timeout=1800,stream=False):
+    result=subprocess.run(args,stdout=None if stream else subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
     if result.returncode:
         (state/'ai-command-error.log').write_bytes(result.stderr[-32000:]);(state/'ai-command-error.log').chmod(0o600)
         raise RuntimeError('Command failed; details retained privately on SIKA1: '+args[0])
@@ -17,7 +17,7 @@ if runtime.get('driveRootName')!='th-data-sika1-ai' or runtime.get('origins',{})
 platform='ghcr.io/tuanpham0411/th-rpi-storage:'+a.platform_release
 command(['docker','pull',platform])
 if a.phase=='clone':
-    command(['docker','run','--rm','--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--mount',f'type=bind,src={config},dst=/config,readonly','--mount',f'type=bind,src={state},dst=/state','--entrypoint','node',platform,'storage/clone-ai.mjs'],timeout=3600)
+    command(['docker','run','--rm','--user','1000:1000','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--mount',f'type=bind,src={config},dst=/config,readonly','--mount',f'type=bind,src={state},dst=/state','--entrypoint','node',platform,'storage/clone-ai.mjs'],timeout=3600,stream=True)
     cloned=json.loads((state/'ai-clone.json').read_text());print(json.dumps({'verifiedCommits':cloned['commits'],'baseline':cloned['baseline'],'sourceRetained':True}));raise SystemExit(0)
 cloned=json.loads((state/'ai-clone.json').read_text())
 if not cloned.get('commits'):raise SystemExit('Verified AI recovery journal required')
@@ -58,7 +58,8 @@ if not receipt.exists():
     command(base+['run','--rm','--no-deps','migrate'])
     command(base+['run','--rm','--no-deps','-v',str(pathlib.Path(__file__).with_name('prepare-ai-recovery.mjs').resolve())+':/app/prepare-ai-recovery.mjs:ro','-v',str(state/'ai-clone.json')+':/recovery/manifest.json:ro','migrate','node','/app/prepare-ai-recovery.mjs'])
     command(base+['run','--rm','--no-deps','migrate','node','server/storage-operator.js','install'])
-    command(base+['run','--rm','--no-deps','migrate','node','server/storage-operator.js','restore-empty'],timeout=3600)
+    source=pathlib.Path(__file__).resolve().parents[1]
+    command(base+['run','--rm','--no-deps','-v',str(source/'storage')+':/app/storage:ro','-v',str(source/'deploy')+':/app/deploy:ro','-v',str(config)+':/config:ro','migrate','node','deploy/restore-ai.mjs'],timeout=3600)
     receipt.write_text(json.dumps({'head':cloned['head'],'release':a.ai_release,'restored':True}))
 else:
     if json.loads(receipt.read_text()).get('release')!=a.ai_release:raise RuntimeError('Existing installation requires a separate upgrade, retained unchanged')

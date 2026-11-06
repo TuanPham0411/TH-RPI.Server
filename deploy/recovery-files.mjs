@@ -40,14 +40,14 @@ export function verifiedDownloader({root,fetchReference,onFile=()=>{}}){
  };
 }
 
-export async function cachedJournal(broker,{parallel=4,progress=()=>{}}={}){
+export async function cachedJournal(broker,{application='portfolio',parallel=4,progress=()=>{}}={}){
  const {history}=await broker('/v1/history',{}),packets=new Map();
- if(!history.length)throw Error('No verified Portfolio history');
+ if(!['portfolio','ai-agent'].includes(application)||!history.length)throw Error('No verified recovery history');
  for(let offset=0;offset<history.length;offset+=parallel){
   const selected=history.slice(offset,offset+parallel);
   const values=await Promise.all(selected.map(async marker=>{
    const packet=await broker('/v1/event',{id:marker.id});
-   if(packet.id!==marker.id||packet.parent!==marker.parent||packet.application!=='portfolio')throw Error('Recovery packet identity differs');
+   if(packet.id!==marker.id||packet.parent!==marker.parent||packet.application!==application)throw Error('Recovery packet identity differs');
    return packet;
   }));
   for(const packet of values)packets.set(packet.id,packet);
