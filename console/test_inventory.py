@@ -14,6 +14,10 @@ def sample(containers=None, services=None, images=None, errors=None):
 
 
 class InventoryTests(unittest.TestCase):
+    def setUp(self):
+        self.telemetry=patch.object(m.telemetry,'sample',return_value={})
+        self.telemetry.start();self.addCleanup(self.telemetry.stop)
+
     def test_container_discovery_includes_stopped_containers_and_only_selected_metadata(self):
         row = {'id': 'abc', 'name': '/brand-new', 'image': 'app:next', 'image_id': 'sha256:123',
                'state': 'exited', 'health': 'not-configured', 'project': 'custom', 'service': 'worker', 'ports': None}
@@ -118,3 +122,14 @@ class InventoryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MetadataUpgradeTests(unittest.TestCase):
+    def test_new_restart_metadata_does_not_invent_restarts_during_upgrade(self):
+        before=sample(services=[{'id':'worker.service','state':'active'}])
+        after=sample(services=[{'id':'worker.service','state':'active','restarts':0,'active_since_us':1000}])
+        self.assertEqual(i.changes(before,after),[])
+        next_sample=sample(services=[{'id':'worker.service','state':'active','restarts':1,'active_since_us':2000}])
+        events=i.changes(after,next_sample)
+        self.assertEqual(len(events),1)
+        self.assertIn('restarts',events[0]['fields'])

@@ -32,7 +32,9 @@ def containers():
                 '"state":{{json .State.Status}},"health":{{with index .State "Health"}}{{json .Status}}{{else}}"not-configured"{{end}},'
                 '"project":{{with .Config.Labels}}{{json (index . "com.docker.compose.project")}}{{else}}null{{end}},'
                 '"service":{{with .Config.Labels}}{{json (index . "com.docker.compose.service")}}{{else}}null{{end}},'
-                '"ports":{{json .NetworkSettings.Ports}}}')
+                '"ports":{{json .NetworkSettings.Ports}},"exit_code":{{json .State.ExitCode}},'
+                '"restart_count":{{json .RestartCount}},"started_at":{{json .State.StartedAt}},'
+                '"finished_at":{{json .State.FinishedAt}}}')
     for offset in range(0, len(ids), 50):
         # A container may disappear between ps and inspect. Treat this sample as
         # unavailable rather than incorrectly reporting every container removed.
@@ -72,7 +74,7 @@ def services():
              'enabled':installed_states.get(name,''),'pid':0,'result':''}
             for name in sorted(names) if name.endswith('@.service')]
     names={name for name in names if not name.endswith('@.service')}
-    properties = 'Id,Description,LoadState,ActiveState,SubState,UnitFileState,MainPID,Result'
+    properties = 'Id,Description,LoadState,ActiveState,SubState,UnitFileState,MainPID,Result,NRestarts,ActiveEnterTimestampMonotonic'
     ordered = sorted(names)
     for offset in range(0, len(ordered), 100):
         text = run(['systemctl', 'show', '--no-pager', '--property=' + properties, '--', *ordered[offset:offset + 100]])
@@ -82,7 +84,8 @@ def services():
                 rows.append({'id': fields['Id'], 'description': fields.get('Description', ''),
                              'load': fields.get('LoadState', 'unknown'), 'state': fields.get('ActiveState', 'unknown'),
                              'sub': fields.get('SubState', 'unknown'), 'enabled': fields.get('UnitFileState', ''),
-                             'pid': int(fields.get('MainPID') or 0), 'result': fields.get('Result', '')})
+                             'pid': int(fields.get('MainPID') or 0), 'result': fields.get('Result', ''),
+                             'restarts': int(fields.get('NRestarts') or 0), 'active_since_us': int(fields.get('ActiveEnterTimestampMonotonic') or 0)})
     return sorted({row['id']:row for row in rows}.values(), key=lambda row: row['id'])
 
 
@@ -113,7 +116,11 @@ def changes(previous, current):
             if old == new:
                 continue
             row = new or old
-            fields = sorted(k for k in set(old or {}) | set(new or {}) if (old or {}).get(k) != (new or {}).get(k))
+            optional={'restarts','active_since_us','exit_code','restart_count','started_at','finished_at'}
+            fields = sorted(k for k in set(old or {}) | set(new or {})
+                            if (old or {}).get(k) != (new or {}).get(k)
+                            and not (old is not None and new is not None and k in optional and (k not in old or k not in new)))
+            if kind=='updated' and not fields:continue
             events.append({'at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                            'source': source, 'kind': kind, 'name': row.get('name', row.get('repository', key)),
                            'fields': fields if kind == 'updated' else []})

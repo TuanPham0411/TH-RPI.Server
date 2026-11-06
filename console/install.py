@@ -58,7 +58,7 @@ def main():
     getty_enabled = host('systemctl', 'is-enabled', 'getty@tty1.service', check=False).returncode == 0
     getty_active = host('systemctl', 'is-active', 'getty@tty1.service', check=False).returncode == 0
     source = pathlib.Path(__file__).resolve().parent
-    files = ('console.py', 'inventory.py', 'monitor.py', 'th-server-console.service', 'th-server-monitor.service')
+    files = ('console.py', 'inventory.py', 'monitor.py', 'telemetry.py', 'dashboard.py', 'th-server-console.service', 'th-server-monitor.service')
     new_release = not release.exists()
     if not new_release:
         if release.is_symlink() or any(not (release / name).is_file() or (release / name).is_symlink() or (release / name).read_bytes() != (source / name).read_bytes() for name in files):

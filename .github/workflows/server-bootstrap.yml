@@ -118,13 +118,16 @@ jobs:
           systemctl is-active th-server-monitor.service
           if [ "$ENABLE_HDMI" = true ]; then systemctl is-active th-server-console.service; fi
           python3 - <<'PY'
-          import json,pathlib,time
+          import json,pathlib,time,socket
           path=pathlib.Path('/var/lib/th-server-console/inventory.json')
           for attempt in range(30):
               try:
                   value=json.loads(path.read_text())
-                  if time.time()-value['at'] < 30 and not value['inventory']['errors']:
-                      print(json.dumps({'inventoryReady':True,'containers':len(value['inventory']['containers']),'services':len(value['inventory']['services'])}));break
+                  host=value['host']
+                  if time.time()-value['at'] < 30 and not value['inventory']['errors'] and not host['errors'] and host['cpu'] is not None:
+                      assert host['hostname']==socket.gethostname()
+                      assert isinstance(host['history'],list) and len(host['history'])<=121
+                      print(json.dumps({'inventoryReady':True,'hostname':host['hostname'],'containers':len(value['inventory']['containers']),'services':len(value['inventory']['services']),'cpu':host['cpu'],'telemetryReady':True,'httpsProbe':host['probe']['https'],'probeLatencyMs':host['probe'].get('latency_ms')}));break
               except (OSError,ValueError,KeyError):pass
               time.sleep(2)
           else:raise SystemExit('Monitor did not publish a fresh, successful Docker/systemd inventory')
