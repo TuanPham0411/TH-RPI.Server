@@ -10,7 +10,7 @@ import {randomUUID} from 'node:crypto';
 import {replayHistory} from './replay.mjs';
 const config=JSON.parse(await readFile(process.env.TH_STORAGE_CONFIG||'/config/runtime.json','utf8'));
 const token=tokenSupplier({...config.oauth,credentialsPath:'/config/drive-credentials.json'});
-const rootId=await ensureRoot(token);
+const rootId=await ensureRoot(token,fetch,config.driveRootName||'th-data');
 const transport=new GoogleDriveTransport({rootId,accessToken:token});
 await mkdir('/state',{recursive:true,mode:0o700});
 const indices=new Map();
@@ -43,7 +43,7 @@ function savePrivate(credentials){const result=privateQueue.then(async()=>{
  const id=randomUUID();await coordinator.commit('server',{schemaVersion:1,id,parent:await coordinator.head('server'),events:[{schema:'server',table:'credentials',action:'INSERT',old:null,new:JSON.stringify(credentials)}]});
 });privateQueue=result.catch(()=>{});return result;}
 const photos=new Photos({oauth:config.oauth,credentials:photosCredentials,saveCredentials:savePrivate});
-const ownerAuth=new OwnerAuth({oauth:config.oauth,save:savePrivate,records:authRecords});
+const ownerAuth=new OwnerAuth({origin:config.origins?.['ai-agent'],oauth:config.oauth,save:savePrivate,records:authRecords});
 await writeFile('/state/drive-root.tmp',JSON.stringify({folderId:rootId,owner:config.oauth.expectedEmail,format:1}),{mode:0o600});await rename('/state/drive-root.tmp','/state/drive-root.json');
 const socket='/run/th-storage/storage.sock';await mkdir('/run/th-storage',{recursive:true,mode:0o700});
 await unlink(socket).catch(error=>{if(error.code!=='ENOENT')throw error;});
