@@ -151,3 +151,28 @@ Deploy server monitor and console manually → Run workflow. Chọn đúng nhán
 chứa bản sửa, bật `hdmi` nếu muốn thay tty1, và nhập tài khoản sudo hiện có
 (với máy hiện tại là `thadmin`). Đây là thao tác triển khai chủ động; workflow
 `console.yml` vẫn chỉ đóng gói và không tự deploy khi push.
+
+## SIKA1: runner th-server-2
+
+SIKA1 uses the existing non-root account `sika1`. The management workflow
+`server-bootstrap.yml` accepts `target=th-server-2`, `admin_user=sika1`, and
+`hdmi=true` (or false for SSH-only). It checks the runner name, hostname SIKA1,
+ARM64 architecture and account before host changes. SIKA1 does not require Nginx.
+
+Run `deploy/register-sika1-runner.sh` as root on SIKA1 to register the runner.
+The script verifies the pinned official ARM64 runner archive checksum, grants the
+existing account Docker access, and reads a repository runner registration token
+from the terminal with echo disabled. Obtain that short-lived token from this
+repository's Settings → Actions → Runners → New self-hosted runner. Do not commit
+or send the token in chat. Runner configuration runs as `sika1`; its systemd
+service is enabled with that account. An existing registration is reused only
+when its repository and runner name match.
+
+Use only the dedicated custom label `th-server-2`. Do not add
+`th-server-bootstrap`: that label belongs to the existing th-server-1 workflows.
+Registration alone does not install the console. After the runner is listening,
+dispatch `server-bootstrap.yml` with the SIKA1 inputs above. The package job runs
+on GitHub, and only the install job runs on the Pi. Monitor and SSH console need
+no application OAuth or storage-broker credentials; those are separate services.
+HDMI runs on tty1; an existing graphical session is preserved and can be switched
+with Ctrl+Alt+F1 locally. SSH usage after deployment: `sudo th-server`.
