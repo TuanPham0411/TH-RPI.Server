@@ -2,6 +2,12 @@ name: Deploy server monitor and console manually
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: Management runner and host to configure
+        type: choice
+        options: [th-server-1, th-server-2]
+        default: th-server-1
+        required: true
       hdmi:
         description: Enable HDMI console on tty1
         type: boolean
@@ -14,7 +20,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: server-bootstrap-th-server-1
+  group: server-bootstrap-${{ inputs.target }}
   cancel-in-progress: false
 jobs:
   package:
@@ -51,7 +57,7 @@ jobs:
           tags: ghcr.io/tuanpham0411/th-rpi-console:${{ github.sha }}
   install:
     needs: package
-    runs-on: [th-server-bootstrap]
+    runs-on: ["${{ inputs.target == 'th-server-2' && 'th-server-2' || 'th-server-bootstrap' }}"]
     timeout-minutes: 15
     permissions: {contents: read, packages: read}
     env:
@@ -60,9 +66,18 @@ jobs:
       - name: Check target runner
         env:
           SELECTED_RUNNER: ${{ runner.name }}
+          TARGET_RUNNER: ${{ inputs.target }}
         run: |
-          test "$SELECTED_RUNNER" = th-server-1
-          test "$(id -un)" = thadmin
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = "$TARGET_RUNNER"
+          case "$TARGET_RUNNER" in
+            th-server-1) test "$(id -un)" = thadmin ;;
+            th-server-2)
+              test "$(hostname | tr '[:lower:]' '[:upper:]')" = SIKA1
+              test "$(id -un)" = sika1
+              ;;
+            *) echo "Unknown deployment target"; exit 1 ;;
+          esac
           test "$(uname -m)" = aarch64
           docker info >/dev/null
       - uses: docker/login-action@v3
@@ -97,6 +112,7 @@ jobs:
       - name: Verify host inventory and terminal services
         env:
           ENABLE_HDMI: ${{ inputs.hdmi }}
+          TARGET_RUNNER: ${{ inputs.target }}
         run: |
           set -euo pipefail
           systemctl is-active th-server-monitor.service
@@ -113,4 +129,5 @@ jobs:
               time.sleep(2)
           else:raise SystemExit('Monitor did not publish a fresh, successful Docker/systemd inventory')
           PY
-          for unit in ssh NetworkManager tailscaled cloudflared nginx; do systemctl is-active "$unit"; done
+          for unit in ssh NetworkManager tailscaled cloudflared; do systemctl is-active "$unit"; done
+          if [ "$TARGET_RUNNER" = th-server-1 ]; then systemctl is-active nginx; fi
