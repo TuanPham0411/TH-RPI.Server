@@ -1,0 +1,51 @@
+name: Relay AI authorization encrypted for SIKA1
+on: workflow_dispatch
+permissions: {contents: read}
+concurrency: {group: ai-sika1-recovery-transfer, cancel-in-progress: false}
+jobs:
+  recipient:
+    runs-on: [th-server-2]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - run: python3 deploy/ai-sealed-relay.py key
+      - uses: actions/upload-artifact@v4
+        with: {name: ai-recipient-certificate, path: ai-public-relay/recipient.pem, retention-days: 1}
+  seal:
+    needs: recipient
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-1
+      - uses: actions/download-artifact@v4
+        with: {name: ai-recipient-certificate, path: ai-public-relay}
+      - run: python3 deploy/ai-sealed-relay.py seal
+      - uses: actions/upload-artifact@v4
+        with: {name: ai-encrypted-bootstrap, path: ai-public-relay/bootstrap.cms, retention-days: 1}
+      - if: always()
+        run: python3 deploy/ai-sealed-relay.py cleanup
+  receive:
+    needs: seal
+    runs-on: [th-server-2]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - uses: actions/download-artifact@v4
+        with: {name: ai-encrypted-bootstrap, path: ai-public-relay}
+      - run: python3 deploy/ai-sealed-relay.py receive
+  cleanup:
+    if: always()
+    needs: [recipient, seal, receive]
+    runs-on: [th-server-2]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - run: test "$RUNNER_NAME" = th-server-2
+      - run: python3 deploy/ai-sealed-relay.py cleanup
