@@ -10,7 +10,7 @@ permissions: {contents: read}
 jobs:
   inspect:
     runs-on: ["${{ inputs.target == 'th-server-2' && 'th-server-2' || 'th-server-bootstrap' }}"]
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with: {persist-credentials: false}
