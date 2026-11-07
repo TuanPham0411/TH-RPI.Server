@@ -49,7 +49,7 @@ jobs:
           tar -xzf "$work/transport.tgz" --strip-components=1 --no-same-owner -C "$work/transport"
           cat "$work/transport"/part-* > "$work/media.tgz"
           printf '%s  %s\n' "$ARCHIVE_SHA" "$work/media.tgz" | sha256sum --check
-          docker cp "$work/source/tools/install_realm_media.py" th-got-web-1:/tmp/got-realm-import.py
+          docker exec -i th-got-web-1 sh -c 'cat > /tmp/got-realm-import.py' < "$work/source/tools/install_realm_media.py"
           docker exec -i -e PYTHONPATH=/app th-got-web-1 python -u /tmp/got-realm-import.py < "$work/media.tgz"
           switched=true
           python3 deploy/got-deploy.py --deploy --local-image --image-sha "$SOURCE_SHA"
