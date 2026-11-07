@@ -29,7 +29,7 @@ jobs:
           curl --fail --location --retry 2 --max-time 900 "https://github.com/TuanPham0411/TH-GoT/releases/download/$MEDIA_TAG/got-realm-v13.tar.gz" -o "$work/media.tar.gz"
           printf '%s  %s\n' "$ARCHIVE_SHA" "$work/media.tar.gz" | sha256sum --check
           curl --fail --location --retry 2 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-GoT/$SOURCE_SHA/tools/install_realm_media.py" -o "$work/import.py"
-          docker cp "$work/import.py" th-got-web-1:/tmp/got-realm-import.py
+          docker exec -i th-got-web-1 sh -c 'cat > /tmp/got-realm-import.py' < "$work/import.py"
           docker exec -i -e PYTHONPATH=/app th-got-web-1 python -u /tmp/got-realm-import.py < "$work/media.tar.gz"
       - name: Verify host connectivity and existing applications
         if: always()
