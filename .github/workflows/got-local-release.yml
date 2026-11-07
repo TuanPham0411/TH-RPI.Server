@@ -1,0 +1,83 @@
+name: Build and deploy pinned GoT on th-server-1
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Tested TH-GoT commit, required: true, type: string}
+      transport_sha: {description: Temporary TH-GoT transport commit, required: true, type: string}
+      archive_sha256: {description: Expected media archive checksum, required: true, type: string}
+permissions: {contents: read}
+concurrency: {group: got-th-server-1, cancel-in-progress: false}
+jobs:
+  release:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - name: Build, verify and import originals before switching GoT
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TRANSPORT_SHA: ${{ inputs.transport_sha }}
+          ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = th-server-1
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$TRANSPORT_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[a-f0-9]{64}$ ]]
+          work=$(mktemp -d)
+          previous=$(docker inspect --format '{{.Config.Image}}' th-got-web-1)
+          switched=false
+          cleanup() {
+            code=$?
+            if [ "$code" -ne 0 ] && [ "$switched" = true ]; then
+              APP_IMAGE="$previous" PUBLIC_URL=https://got.th.io.vn GOOGLE_REDIRECT_URI=https://got.th.io.vn/auth/callback BIND_ADDRESS=127.0.0.1 PORT=5082 TRUST_PROXY=1 docker compose -p th-got --env-file /srv/th-got/app/.env -f "$work/source/compose.yaml" up -d --no-build --wait
+            fi
+            docker exec th-got-web-1 rm -f /tmp/got-realm-import.py >/dev/null 2>&1 || true
+            rm -rf -- "$work"
+            exit "$code"
+          }
+          trap cleanup EXIT
+          curl -fL --retry 2 --max-time 600 "https://codeload.github.com/TuanPham0411/TH-GoT/tar.gz/$SOURCE_SHA" -o "$work/source.tgz"
+          mkdir "$work/source"
+          tar -xzf "$work/source.tgz" --strip-components=1 --no-same-owner -C "$work/source"
+          docker build --memory 384m --build-arg APP_REVISION="$SOURCE_SHA" -t "ghcr.io/tuanpham0411/th-got:$SOURCE_SHA" "$work/source"
+          docker run --rm --network none --entrypoint sh -v "$work/source:/source:ro" "ghcr.io/tuanpham0411/th-got:$SOURCE_SHA" -c 'cd /source; PYTHONPATH=/source/game python -m unittest discover -s tests -q'
+          curl -fL --retry 2 --max-time 1200 "https://codeload.github.com/TuanPham0411/TH-GoT/tar.gz/$TRANSPORT_SHA" -o "$work/transport.tgz"
+          mkdir "$work/transport"
+          tar -xzf "$work/transport.tgz" --strip-components=1 --no-same-owner -C "$work/transport"
+          cat "$work/transport"/part-* > "$work/media.tgz"
+          printf '%s  %s\n' "$ARCHIVE_SHA" "$work/media.tgz" | sha256sum --check
+          docker cp "$work/source/tools/install_realm_media.py" th-got-web-1:/tmp/got-realm-import.py
+          docker exec -i -e PYTHONPATH=/app th-got-web-1 python -u /tmp/got-realm-import.py < "$work/media.tgz"
+          switched=true
+          python3 deploy/got-deploy.py --deploy --local-image --image-sha "$SOURCE_SHA"
+      - name: Warm and verify every realm image and film
+        run: |
+          docker exec -i th-got-web-1 python -u - <<'PY'
+          import json,time
+          from pathlib import Path
+          from urllib.request import urlopen,Request
+          assets=json.loads(Path('/app/realm-assets.json').read_text())
+          for key,item in assets.items():
+              for attempt in range(3):
+                  try:
+                      request=Request('http://127.0.0.1:5000/world-assets/'+key,headers={'Range':'bytes=0-1023'} if item['mime']=='video/mp4' else {})
+                      with urlopen(request,timeout=90) as response:
+                          body=response.read()
+                          assert response.status==(206 if item['mime']=='video/mp4' else 200)
+                          assert len(body)>100 and response.headers.get('ETag')
+                      print('Verified realm asset:',key,flush=True)
+                      break
+                  except Exception:
+                      if attempt==2:raise
+                      time.sleep(2)
+          print('Realm assets verified:',len(assets))
+          PY
+      - name: Verify host connectivity and other applications
+        if: always()
+        run: |
+          systemctl is-active ssh NetworkManager tailscaled cloudflared nginx
+          curl -fsS --max-time 30 https://th.io.vn/api/health
+          curl -fsS --max-time 30 https://esp.th.io.vn/healthz
