@@ -25,7 +25,7 @@ def run(command, env=None):
     return result.stdout
 
 
-def deploy(sha):
+def deploy(sha, local_image=False):
     if not re.fullmatch('[a-f0-9]{40}', sha):
         raise RuntimeError('A full published image SHA is required')
     environment = pathlib.Path('/srv/th-got/app/.env')
@@ -45,7 +45,11 @@ def deploy(sha):
     compose = ['docker','compose','-p','th-got','--env-file',str(environment),'-f',str(release/'compose.yaml')]
     run(compose+['config','--quiet'], runtime)
     print(json.dumps({'phase':'pull-tested-got-image','release':sha}), flush=True)
-    run(compose+['pull','web'], runtime)
+    if local_image:
+        revision=run(['docker','run','--rm','--network','none','--entrypoint','python',runtime['APP_IMAGE'],'-c',"import os;print(os.environ.get('APP_REVISION',''))"]).decode().strip()
+        if revision!=sha:raise RuntimeError('Local image revision does not match pinned source')
+    else:
+        run(compose+['pull','web'], runtime)
     print(json.dumps({'phase':'start-got','volume':'th-got_data','bind':'127.0.0.1:5082'}), flush=True)
     run(compose+['up','-d','--no-build','--wait','--wait-timeout','180'], runtime)
     run(['python3',str(release/'tools/smoke.py')])
@@ -127,6 +131,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--deploy',action='store_true')
     parser.add_argument('--image-sha')
+    parser.add_argument('--local-image',action='store_true',help='Use an already built, revision-verified local image')
     args = parser.parse_args()
     os.umask(0o077)
     if args.deploy:
@@ -136,7 +141,7 @@ if __name__ == '__main__':
         try:
             with open(HOME/'deploy.lock','a') as lock:
                 fcntl.flock(lock,fcntl.LOCK_EX)
-                deploy(args.image_sha or '')
+                deploy(args.image_sha or '', local_image=args.local_image)
         except Exception as error:
             raise SystemExit(str(error))
     else:
