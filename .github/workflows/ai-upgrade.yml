@@ -1,0 +1,50 @@
+name: Build and upgrade AI Studio on SIKA1
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Tested immutable TH-AI.Agent source commit
+        type: string
+        required: true
+permissions: {contents: read}
+concurrency: {group: ai-sika1-deployment, cancel-in-progress: false}
+jobs:
+  upgrade:
+    runs-on: [th-server-2]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with: {persist-credentials: false}
+      - name: Inspect retained deployment on the exact host
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SELECTED_RUNNER: ${{ runner.name }}
+        run: |
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = th-server-2
+          test "$(hostname | tr '[:lower:]' '[:upper:]')" = SIKA1
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          python3 deploy/upgrade-ai.py --release "$SOURCE_SHA" --inspect
+          df -h / | tail -n 1
+      - name: Build tested native ARM64 containers while the old release serves
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          trap 'rm -rf -- "$work"' EXIT
+          curl -fL --retry 2 --max-time 600 "https://codeload.github.com/TuanPham0411/TH-AI.Agent/tar.gz/$SOURCE_SHA" -o "$work/source.tgz"
+          mkdir "$work/source"
+          tar -xzf "$work/source.tgz" --strip-components=1 --no-same-owner -C "$work/source"
+          docker build --memory 384m --label "org.opencontainers.image.revision=$SOURCE_SHA" --target api -t "ghcr.io/tuanpham0411/th-ai-agent-api:$SOURCE_SHA" "$work/source"
+          docker build --memory 384m --label "org.opencontainers.image.revision=$SOURCE_SHA" --target web -t "ghcr.io/tuanpham0411/th-ai-agent-web:$SOURCE_SHA" "$work/source"
+      - name: Verify Drive, back up data and replace only API and web
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 deploy/upgrade-ai.py --release "$SOURCE_SHA"
+      - name: Verify public endpoints and retained host connectivity
+        run: |
+          set -euo pipefail
+          curl -fSs --retry 2 --max-time 30 https://thienha.io.vn/api/health
+          curl -fSs --retry 2 --max-time 30 https://thienha.io.vn/api/ready
+          systemctl is-active ssh NetworkManager tailscaled cloudflared docker
