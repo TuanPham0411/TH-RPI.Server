@@ -1,0 +1,40 @@
+name: Import pinned GoT realm originals into Drive
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag: {description: Temporary TH-GoT media release tag, required: true, type: string}
+      archive_sha256: {description: Pinned archive SHA256, required: true, type: string}
+      source_sha: {description: TH-GoT commit containing the verified importer, required: true, type: string}
+permissions: {contents: read}
+concurrency: {group: got-th-server-1, cancel-in-progress: false}
+jobs:
+  import:
+    runs-on: [th-server-bootstrap]
+    timeout-minutes: 30
+    steps:
+      - name: Transfer checked originals using the existing private Drive connection
+        env:
+          SELECTED_RUNNER: ${{ runner.name }}
+          MEDIA_TAG: ${{ inputs.release_tag }}
+          ARCHIVE_SHA: ${{ inputs.archive_sha256 }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$SELECTED_RUNNER" = th-server-1
+          [[ "$MEDIA_TAG" =~ ^realm-media-[a-z0-9-]+$ ]]
+          [[ "$ARCHIVE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          work=$(mktemp -d)
+          trap 'rm -rf -- "$work"; docker exec th-got-web-1 rm -f /tmp/got-realm-import.py >/dev/null 2>&1 || true' EXIT
+          curl --fail --location --retry 2 --max-time 900 "https://github.com/TuanPham0411/TH-GoT/releases/download/$MEDIA_TAG/got-realm-v13.tar.gz" -o "$work/media.tar.gz"
+          printf '%s  %s\n' "$ARCHIVE_SHA" "$work/media.tar.gz" | sha256sum --check
+          curl --fail --location --retry 2 --max-time 60 "https://raw.githubusercontent.com/TuanPham0411/TH-GoT/$SOURCE_SHA/tools/install_realm_media.py" -o "$work/import.py"
+          docker cp "$work/import.py" th-got-web-1:/tmp/got-realm-import.py
+          docker exec -i -e PYTHONPATH=/app th-got-web-1 python -u /tmp/got-realm-import.py < "$work/media.tar.gz"
+      - name: Verify host connectivity and existing applications
+        if: always()
+        run: |
+          systemctl is-active ssh NetworkManager tailscaled cloudflared nginx
+          curl --fail --silent --show-error --max-time 20 https://got.th.io.vn/readyz
+          curl --fail --silent --show-error --max-time 20 https://th.io.vn/api/health
+          curl --fail --silent --show-error --max-time 20 https://esp.th.io.vn/healthz
