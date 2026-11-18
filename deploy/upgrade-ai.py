@@ -33,6 +33,15 @@ def updated_compose(original, release):
     return result
 
 
+def migration_followups(base, before_versions, after_versions):
+    """A new schema needs a baseline inventory before new-table events exist."""
+    commands = []
+    if before_versions != after_versions:
+        commands.append((base + ['run', '--rm', '--no-deps', 'migrate', 'node', 'server/storage-operator.js', 'baseline'], 300))
+    commands.append((base + ['run', '--rm', '--no-deps', 'migrate', 'node', 'server/storage-operator.js', 'probe'], 120))
+    return commands
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--release', required=True)
@@ -69,7 +78,15 @@ def main():
     counts_sql = "SELECT json_build_object('workflows',(SELECT count(*) FROM ai_workflows),'credentials',(SELECT count(*) FROM ai_credentials),'mediaJobs',(SELECT count(*) FROM ai_media_jobs),'files',(SELECT count(*) FROM files),'active',(SELECT count(*) FROM ai_workflows WHERE active),'running',(SELECT count(*) FROM ai_runs WHERE status IN ('queued','running')))"
 
     def counts(base):
-        return json.loads(run(base + ['exec', '-T', 'db', 'psql', '-U', 'postgres', '-d', 'th_ai', '-At', '-c', counts_sql]))
+        result = json.loads(run(base + ['exec', '-T', 'db', 'psql', '-U', 'postgres', '-d', 'th_ai', '-At', '-c', counts_sql]))
+        exists = run(base + ['exec', '-T', 'db', 'psql', '-U', 'postgres', '-d', 'th_ai', '-At', '-c', "SELECT to_regclass('public.company_jobs') IS NOT NULL"]).strip()
+        if exists == b't':
+            company = json.loads(run(base + ['exec', '-T', 'db', 'psql', '-U', 'postgres', '-d', 'th_ai', '-At', '-c', "SELECT json_build_object('companyJobs',count(*),'companyRunning',count(*) FILTER(WHERE state='running')) FROM company_jobs"]))
+            result.update(company)
+        return result
+
+    def versions(base):
+        return json.loads(run(base + ['exec', '-T', 'db', 'psql', '-U', 'postgres', '-d', 'th_ai', '-At', '-c', "SELECT coalesce(json_agg(version ORDER BY version),'[]'::json) FROM ai_schema_migrations"]))
 
     before = counts(old_base)
     print(json.dumps({'phase': 'retained-deployment', 'release': previous.get('imageTag'), 'dataCounts': before}), flush=True)
@@ -83,7 +100,8 @@ def main():
     # Check Drive acknowledgement before stopping the existing API.
     run(old_base + ['run', '--rm', '--no-deps', 'migrate', 'node', 'server/storage-operator.js', 'probe'], timeout=120)
     for _ in range(120):
-        if not counts(old_base)['running']:
+        current = counts(old_base)
+        if not current['running'] and not current.get('companyRunning', 0):
             break
         print(json.dumps({'phase': 'waiting-for-active-workflow'}), flush=True)
         time.sleep(5)
@@ -100,7 +118,7 @@ def main():
         switched = True
         run(old_base + ['stop', '-t', '360', 'api'], timeout=390)
         before = counts(old_base)
-        if before['running']:
+        if before['running'] or before.get('companyRunning', 0):
             raise RuntimeError('A workflow arrived while stopping; retained release will resume for review')
         backup = release / ('database-before-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '.dump')
         with backup.open('wb') as output:
@@ -112,11 +130,14 @@ def main():
         if verified.returncode:
             raise RuntimeError('Backup archive cannot be read')
         print(json.dumps({'phase': 'backup-verified', 'bytes': backup.stat().st_size}), flush=True)
+        before_versions = versions(old_base)
         run(base + ['run', '--rm', '--no-deps', 'migrate'], timeout=180)
-        run(base + ['run', '--rm', '--no-deps', 'migrate', 'node', 'server/storage-operator.js', 'probe'], timeout=120)
+        for command, timeout in migration_followups(base, before_versions, versions(base)):
+            run(command, timeout=timeout)
+        print(json.dumps({'phase': 'schema-recovery-verified', 'versions': versions(base)}), flush=True)
         after = counts(base)
-        for key in ('workflows', 'credentials', 'mediaJobs', 'files', 'active'):
-            if before[key] != after[key]:
+        for key in ('workflows', 'credentials', 'mediaJobs', 'files', 'active', 'companyJobs'):
+            if key in before and before[key] != after.get(key):
                 raise RuntimeError('Data counts changed during upgrade: ' + key)
         run(base + ['up', '-d', '--no-build', '--no-deps', '--wait', '--wait-timeout', '180', 'api'], timeout=210)
         run(base + ['up', '-d', '--no-build', '--no-deps', '--wait', '--wait-timeout', '90', 'web'], timeout=120)
