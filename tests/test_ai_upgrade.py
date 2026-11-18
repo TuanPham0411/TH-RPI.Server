@@ -31,6 +31,13 @@ class UpgradePlan(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.updated_compose(original, 'a' * 40)
 
+    def test_schema_upgrade_baselines_before_probe_and_never_replaces_data_services(self):
+        base = ['docker', 'compose', '-p', 'ai-agent']
+        changed = module.migration_followups(base, [1, 2, 3, 4], [1, 2, 3, 4, 5])
+        self.assertEqual([command[-1] for command, _ in changed], ['baseline', 'probe'])
+        self.assertTrue(all(command[:len(base)] == base for command, _ in changed))
+        self.assertEqual([command[-1] for command, _ in module.migration_followups(base, [1, 2, 3, 4, 5], [1, 2, 3, 4, 5])], ['probe'])
+
 
 if __name__ == '__main__':
     unittest.main()
